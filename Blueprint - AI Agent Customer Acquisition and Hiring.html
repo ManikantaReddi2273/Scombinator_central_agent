@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>S Combinator  Central Agent Platform Blueprint</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f3f4f6;
+      color: #1f2937;
+      line-height: 1.5;
+      padding: 24px;
+    }
+    
+    .container { max-width: 1200px; margin: 0 auto; }
+    
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+    .header p { color: #6b7280; }
+    
+    /* Cards */
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      border: 1px solid #e5e7eb;
+    }
+    
+    /* Transformation Pipeline */
+    .pipeline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .pipeline-stage {
+      flex: 1;
+      min-width: 120px;
+      text-align: center;
+      padding: 12px 8px;
+    }
+    .pipeline-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin: 0 auto 8px;
+    }
+    .pipeline-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+    }
+    .pipeline-arrow {
+      color: #d1d5db;
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+    
+    /* Principles */
+    .principles {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+    }
+    .principle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #f9fafb;
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+    .principle-icon { font-size: 20px; }
+    .principle-text strong {
+      display: block;
+      font-size: 13px;
+      color: #1f2937;
+    }
+    .principle-text span {
+      font-size: 11px;
+      color: #6b7280;
+    }
+    
+    /* Two Column Layout */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 800px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+    
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .section-bar {
+      width: 4px;
+      height: 32px;
+      border-radius: 4px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1f2937;
+    }
+    
+    /* Flow Cards */
+    .flow-card {
+      background: white;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .flow-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .flow-card.active {
+      border-width: 2px;
+    }
+    .flow-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .flow-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .flow-category {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+    }
+    .flow-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 4px;
+    }
+    .flow-desc {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 12px;
+    }
+    .flow-progress {
+      display: flex;
+      gap: 4px;
+    }
+    .flow-progress-bar {
+      height: 4px;
+      flex: 1;
+      border-radius: 2px;
+    }
+    .flow-steps-count {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 8px;
+    }
+    
+    /* Connection Indicator */
+    .connection {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      color: #9ca3af;
+      font-size: 12px;
+    }
+    .connection-line {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(to right, transparent, #d1d5db, transparent);
+    }
+    
+    /* Flow Detail - Inline Expansion */
+    .flow-detail {
+      display: none;
+      background: white;
+      border-radius: 0 0 12px 12px;
+      padding: 20px;
+      margin-top: -2px;
+      border: 2px solid;
+      border-top: 1px dashed;
+      animation: slideDown 0.2s ease-out;
+    }
+    .flow-detail.visible { display: block; }
+    
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .flow-detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .flow-detail-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+    .flow-detail-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 28px;
+      color: #9ca3af;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .close-btn:hover { color: #6b7280; }
+    
+    /* Step Mini Nav */
+    .step-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .step-nav-item {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .step-nav-arrow {
+      color: #d1d5db;
+      align-self: center;
+    }
+    
+    /* Step Cards */
+    .step-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .step-card:hover {
+      border-color: #d1d5db;
+    }
+    .step-card.active {
+      border-width: 2px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .step-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .step-num {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .step-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    
+    .step-content {
+      display: none;
+      margin-top: 16px;
+      margin-left: 44px;
+    }
+    .step-card.active .step-content { display: block; }
+    
+    .step-box {
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    .step-box-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+    .step-box-input { background: #f9fafb; }
+    .step-box-process { background: white; border: 1px solid #e5e7eb; }
+    .step-box-output { font-weight: 500; }
+    
+    .step-box ul {
+      list-style: none;
+      padding: 0;
+    }
+    .step-box li {
+      font-size: 13px;
+      color: #374151;
+      padding: 2px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .step-box li::before {
+      content: """;
+      flex-shrink: 0;
+    }
+    
+    /* Summary */
+    .summary {
+      background: linear-gradient(135deg, #1f2937, #111827);
+      border-radius: 12px;
+      padding: 24px;
+      color: white;
+    }
+    .summary h3 {
+      font-size: 18px;
+      margin-bottom: 16px;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 600px) {
+      .summary-grid { grid-template-columns: 1fr; }
+    }
+    .summary-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .summary-num {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .summary-text strong {
+      display: block;
+      font-size: 14px;
+    }
+    .summary-text span {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    
+    /* Footer */
+    .footer {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    /* Flow wrapper for inline expansion */
+    .flow-wrapper {
+      margin-bottom: 12px;
+    }
+    .flow-wrapper .flow-card.active {
+      border-radius: 12px 12px 0 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>S Combinator  Central Agent Platform</h1>
+      <p>Multi-company operational agent for Customer Acquisition + Hiring</p>
+    </div>
+    
+    <!-- Core Transformation Pipeline -->
+    <div class="card">
+      <div style="text-align:center; font-size:11px; font-weight:600; color:#6b7280; margin-bottom:16px; text-transform:uppercase; letter-spacing:1px;">
+        Core Transformation Pipeline
+      </div>
+      <div class="pipeline">
+        <div class="pipeline-stage">
+          <div class="pipeline-icon" style="background:#6b728020;">=å</div>
+          <div class="pipeline-label">Raw Inputs</div>
+        </div>
+        <div class="pipeline-arrow">’</div>
+        <div class="pipeline-stage">
+          <div class="pipeline-icon" style="background:#3b82f620;">>à</div>
+          <div class="pipeline-label">Structured Understanding</div>
+        </div>
+        <div class="pipeline-arrow">’</div>
+        <div class="pipeline-stage">
+          <div class="pipeline-icon" style="background:#8b5cf620;">–</div>
+          <div class="pipeline-label">Prioritized Decisions</div>
+        </div>
+        <div class="pipeline-arrow">’</div>
+        <div class="pipeline-stage">
+          <div class="pipeline-icon" style="background:#10b98120;"></div>
+          <div class="pipeline-label">Editable Drafts</div>
+        </div>
+        <div class="pipeline-arrow">’</div>
+        <div class="pipeline-stage">
+          <div class="pipeline-icon" style="background:#f59e0b20;"></div>
+          <div class="pipeline-label">Logged Outcomes</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Design Principles -->
+    <div class="card">
+      <div class="principles">
+        <div class="principle">
+          <span class="principle-icon"><â</span>
+          <div class="principle-text">
+            <strong>Company-Aware</strong>
+            <span>Multi-tenant, per-company context</span>
+          </div>
+        </div>
+        <div class="principle">
+          <span class="principle-icon">¡</span>
+          <div class="principle-text">
+            <strong>Priority-Driven</strong>
+            <span>Unified cross-company queue</span>
+          </div>
+        </div>
+        <div class="principle">
+          <span class="principle-icon">=Ë</span>
+          <div class="principle-text">
+            <strong>Summary-First</strong>
+            <span>Zero-context executive summaries</span>
+          </div>
+        </div>
+        <div class="principle">
+          <span class="principle-icon">=d</span>
+          <div class="principle-text">
+            <strong>Human-Controlled</strong>
+            <span>Editable drafts, final approval</span>
+          </div>
+        </div>
+        <div class="principle">
+          <span class="principle-icon">=Ý</span>
+          <div class="principle-text">
+            <strong>Fully Logged</strong>
+            <span>Complete audit trail</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Two Column Layout -->
+    <div class="two-col">
+      <!-- Part A: Customer Acquisition -->
+      <div>
+        <div class="section-header">
+          <div class="section-bar" style="background:linear-gradient(to bottom, #3b82f6, #8b5cf6);"></div>
+          <div class="section-title">Part A: Customer Acquisition</div>
+        </div>
+        
+        <!-- Flow 1: Inbound -->
+        <div class="flow-wrapper" id="wrapper-inbound">
+          <div class="flow-card" data-flow="inbound">
+            <div class="flow-header">
+              <div class="flow-dot" style="background:#3b82f6;"></div>
+              <span class="flow-category">Customer Acquisition</span>
+            </div>
+            <div class="flow-title">Flow 1: Inbound Email ’ Response</div>
+            <div class="flow-desc">Someone emails a company inbox and expects a reply</div>
+            <div class="flow-progress">
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.3;"></div>
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.4;"></div>
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.5;"></div>
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.6;"></div>
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.7;"></div>
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.8;"></div>
+              <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.9;"></div>
+            </div>
+            <div class="flow-steps-count">7 steps</div>
+          </div>
+          <div class="flow-detail" id="detail-inbound"></div>
+        </div>
+        
+        <!-- Flow 2: Outbound -->
+        <div class="flow-wrapper" id="wrapper-outbound">
+          <div class="flow-card" data-flow="outbound">
+            <div class="flow-header">
+              <div class="flow-dot" style="background:#8b5cf6;"></div>
+              <span class="flow-category">Customer Acquisition</span>
+            </div>
+            <div class="flow-title">Flow 2: Outbound Email ’ Send</div>
+            <div class="flow-desc">Send emails proactively (leads, marketing, agreements, intros)</div>
+            <div class="flow-progress">
+              <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.3;"></div>
+              <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.45;"></div>
+              <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.6;"></div>
+              <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.75;"></div>
+              <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.85;"></div>
+              <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.95;"></div>
+            </div>
+            <div class="flow-steps-count">6 steps</div>
+          </div>
+          <div class="flow-detail" id="detail-outbound"></div>
+        </div>
+        
+        <div class="connection">
+          <div class="connection-line"></div>
+          <span>Replies loop back to Inbound</span>
+          <div class="connection-line"></div>
+        </div>
+      </div>
+      
+      <!-- Part B: Hiring & Talent -->
+      <div>
+        <div class="section-header">
+          <div class="section-bar" style="background:linear-gradient(to bottom, #10b981, #f59e0b);"></div>
+          <div class="section-title">Part B: Hiring & Talent Management</div>
+        </div>
+        
+        <!-- Flow 3: Pre-Hiring -->
+        <div class="flow-wrapper" id="wrapper-prehiring">
+          <div class="flow-card" data-flow="prehiring">
+            <div class="flow-header">
+              <div class="flow-dot" style="background:#10b981;"></div>
+              <span class="flow-category">Hiring & Talent</span>
+            </div>
+            <div class="flow-title">Flow 3: Pre-Hiring</div>
+            <div class="flow-desc">Applications ’ Screening ’ Shortlisting</div>
+            <div class="flow-progress">
+              <div class="flow-progress-bar" style="background:#10b981; opacity:0.3;"></div>
+              <div class="flow-progress-bar" style="background:#10b981; opacity:0.45;"></div>
+              <div class="flow-progress-bar" style="background:#10b981; opacity:0.6;"></div>
+              <div class="flow-progress-bar" style="background:#10b981; opacity:0.8;"></div>
+              <div class="flow-progress-bar" style="background:#10b981; opacity:0.95;"></div>
+            </div>
+            <div class="flow-steps-count">5 steps</div>
+          </div>
+          <div class="flow-detail" id="detail-prehiring"></div>
+        </div>
+        
+        <!-- Flow 4: Post-Hiring -->
+        <div class="flow-wrapper" id="wrapper-posthiring">
+          <div class="flow-card" data-flow="posthiring">
+            <div class="flow-header">
+              <div class="flow-dot" style="background:#f59e0b;"></div>
+              <span class="flow-category">Hiring & Talent</span>
+            </div>
+            <div class="flow-title">Flow 4: Post-Hiring</div>
+            <div class="flow-desc">Interview ’ Decision ’ Communication</div>
+            <div class="flow-progress">
+              <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.3;"></div>
+              <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.45;"></div>
+              <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.6;"></div>
+              <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.8;"></div>
+              <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.95;"></div>
+            </div>
+            <div class="flow-steps-count">5 steps</div>
+          </div>
+          <div class="flow-detail" id="detail-posthiring"></div>
+        </div>
+        
+        <div class="connection">
+          <div class="connection-line"></div>
+          <span>Shortlisted ’ Interview pipeline</span>
+          <div class="connection-line"></div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Summary -->
+    <div class="summary">
+      <h3>Four Core Operational Pipelines</h3>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-num" style="background:#3b82f6;">1</div>
+          <div class="summary-text">
+            <strong>Inbound Email</strong>
+            <span>Understand ’ Decide ’ Respond</span>
+          </div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-num" style="background:#8b5cf6;">2</div>
+          <div class="summary-text">
+            <strong>Outbound Email</strong>
+            <span>Draft ’ Send ’ Track</span>
+          </div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-num" style="background:#10b981;">3</div>
+          <div class="summary-text">
+            <strong>Pre-Hiring</strong>
+            <span>Resume ’ Signal ’ Verdict</span>
+          </div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-num" style="background:#f59e0b;">4</div>
+          <div class="summary-text">
+            <strong>Post-Hiring</strong>
+            <span>Interview ’ Decision ’ Communicate</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+      Click any flow card to expand details " Click steps to see Input ’ Process ’ Output
+    </div>
+  </div>
+
+  <script>
+    const flowData = {
+      inbound: {
+        title: 'Flow 1: Inbound Email ’ Response',
+        category: 'Customer Acquisition',
+        color: '#3b82f6',
+        light: '#dbeafe',
+        steps: [
+          {
+            num: 1,
+            title: 'Email Ingestion & Company ID',
+            input: 'Raw email',
+            process: ['Map inbox ’ company (tenant)', 'Identify thread context (new/existing)'],
+            output: 'Email tagged with company_id + thread context'
+          },
+          {
+            num: 2,
+            title: 'Multi-Dimensional Understanding',
+            input: 'Tagged email',
+            process: [
+              'Function: Sales/Hiring/Legal/Support/Ops/Marketing/Admin',
+              'Intent: Inquiry/Follow-up/Objection/Scheduling/Application/FAQ/Complaint',
+              'Urgency: Immediate/Soon/Can wait',
+              'Impact: Revenue/Hiring/Brand/Low',
+              'Confidence: Clear/Ambiguous/Missing info'
+            ],
+            output: 'Structured classification metadata'
+          },
+          {
+            num: 3,
+            title: 'Priority Scoring',
+            input: 'Classification metadata',
+            process: ['Convert signals ’ numeric score (0-100)', 'Apply company context (stage, SLAs)'],
+            output: 'Priority score + queue placement'
+          },
+          {
+            num: 4,
+            title: 'Zero-Context Executive Summary',
+            input: 'Email + metadata',
+            process: ['Generate 1-2 line summary', 'Explain meaning, not content', 'No quoting, no fluff'],
+            output: 'Executive-ready summary'
+          },
+          {
+            num: 5,
+            title: 'Action Recommendation',
+            input: 'Summary + context',
+            process: ['Reply with template', 'Ask for missing info', 'Schedule meeting', 'Hold/Ignore', 'Escalate to human'],
+            output: 'Recommended next action'
+          },
+          {
+            num: 6,
+            title: 'Drafting Layer',
+            input: 'Selected action',
+            process: ['Load company templates', 'Apply brand tone', 'Include approved FAQs/pricing'],
+            output: 'Editable draft + subject suggestions'
+          },
+          {
+            num: 7,
+            title: 'Review, Send & Log',
+            input: 'Draft email',
+            process: ['Human review & edit', 'Send email', 'Log conversation state'],
+            output: 'Sent response + audit record'
+          }
+        ]
+      },
+      outbound: {
+        title: 'Flow 2: Outbound Email ’ Send',
+        category: 'Customer Acquisition',
+        color: '#8b5cf6',
+        light: '#ede9fe',
+        steps: [
+          {
+            num: 1,
+            title: 'Intent Definition',
+            input: 'User/system trigger',
+            process: ['Define why email is being sent', 'Identify target company'],
+            output: 'Outbound intent + company context'
+          },
+          {
+            num: 2,
+            title: 'Recipient Context Gathering',
+            input: 'Intent',
+            process: ['Collect: name, company, role', 'Identify lead stage (new/warm/existing)', 'Enrich from sheets/CRM'],
+            output: 'Enriched recipient profile'
+          },
+          {
+            num: 3,
+            title: 'Template Selection',
+            input: 'Recipient profile',
+            process: ['AI selects best company template', 'Match: intent + recipient type + relationship stage'],
+            output: 'Selected template + required variables'
+          },
+          {
+            num: 4,
+            title: 'Draft Generation',
+            input: 'Template + variables',
+            process: ['Auto-fill variables', 'Apply brand tone', 'Adjust CTA (reply/call/review)'],
+            output: 'Draft outbound email'
+          },
+          {
+            num: 5,
+            title: 'Review & Scheduling',
+            input: 'Draft email',
+            process: ['Human review & edit', 'Send now / Schedule / Add to sequence'],
+            output: 'Scheduled or sent email'
+          },
+          {
+            num: 6,
+            title: 'Tracking & Feedback Loop',
+            input: 'Sent email',
+            process: ['Monitor for replies', 'Route replies ’ Inbound Flow', 'Update engagement status'],
+            output: 'Closed-loop tracking'
+          }
+        ]
+      },
+      prehiring: {
+        title: 'Flow 3: Pre-Hiring',
+        category: 'Hiring & Talent',
+        color: '#10b981',
+        light: '#d1fae5',
+        steps: [
+          {
+            num: 1,
+            title: 'Resume Ingestion',
+            input: 'Resume (email/upload)',
+            process: ['Map to company', 'Map to role (or AI suggests)'],
+            output: 'Candidate record created'
+          },
+          {
+            num: 2,
+            title: 'Signal Extraction',
+            input: 'Resume',
+            process: ['Extract: Skills', 'Extract: Evidence of execution', 'Extract: Experience depth', 'Flag: Red flags'],
+            output: 'Structured candidate signals'
+          },
+          {
+            num: 3,
+            title: 'Role-Aware Evaluation',
+            input: 'Candidate signals',
+            process: ['Compare against role blueprint', 'Check: Must-haves', 'Check: Nice-to-haves', 'Check: Disqualifiers'],
+            output: 'Fit score'
+          },
+          {
+            num: 4,
+            title: 'Zero-Context Summary',
+            input: 'Evaluation',
+            process: ['2-3 line overview', 'Highlight strengths', 'Note gaps'],
+            output: 'One-screen candidate snapshot'
+          },
+          {
+            num: 5,
+            title: 'Verdict & Shortlisting',
+            input: 'Summary + score',
+            process: ['Strong Yes', 'Maybe', 'Reject', 'Better fit elsewhere'],
+            output: 'Updated hiring pipeline'
+          }
+        ]
+      },
+      posthiring: {
+        title: 'Flow 4: Post-Hiring',
+        category: 'Hiring & Talent',
+        color: '#f59e0b',
+        light: '#fef3c7',
+        steps: [
+          {
+            num: 1,
+            title: 'Interview Kit Preparation',
+            input: 'Shortlisted candidate',
+            process: ['Generate candidate-specific questions', 'Create practical task ideas', 'Define evaluation focus areas'],
+            output: 'Interview kit for interviewers'
+          },
+          {
+            num: 2,
+            title: 'Interview Scheduling',
+            input: 'Interview kit',
+            process: ['Send scheduling email', 'Use company calendar', 'Send reminders automatically'],
+            output: 'Interview scheduled & logged'
+          },
+          {
+            num: 3,
+            title: 'Decision Recording',
+            input: 'Completed interview',
+            process: ['Capture interview feedback', 'Record: Offer / Reject / Hold'],
+            output: 'Decision state saved'
+          },
+          {
+            num: 4,
+            title: 'Decision Communication',
+            input: 'Decision',
+            process: ['Draft offer/rejection email', 'Apply company tone', 'Human approves & sends'],
+            output: 'Candidate informed + brand consistency'
+          },
+          {
+            num: 5,
+            title: 'Hiring Visibility & Digest',
+            input: 'All hiring data',
+            process: ['Aggregate status across companies', 'Highlight pending decisions', 'Surface bottlenecks & strong candidates'],
+            output: 'Clear hiring overview for founder'
+          }
+        ]
+      }
+    };
+
+    let activeFlow = null;
+    let activeStep = null;
+
+    function renderFlowDetail(flowId) {
+      const flow = flowData[flowId];
+      const detailEl = document.getElementById(`detail-${flowId}`);
+      const cardEl = document.querySelector(`[data-flow="${flowId}"]`);
+      
+      // If clicking the same flow, close it
+      if (activeFlow === flowId) {
+        closeFlow(flowId);
+        return;
+      }
+      
+      // Close any other open flow first
+      if (activeFlow) {
+        closeFlow(activeFlow);
+      }
+      
+      activeFlow = flowId;
+      activeStep = null;
+      
+      // Activate this flow card
+      cardEl.classList.add('active');
+      cardEl.style.borderColor = flow.color;
+      cardEl.style.backgroundColor = flow.light;
+      
+      const stepsHtml = flow.steps.map(step => `
+        <div class="step-card" data-step="${step.num}">
+          <div class="step-header">
+            <div class="step-num" style="background:${flow.color};">${step.num}</div>
+            <div class="step-title">${step.title}</div>
+          </div>
+          <div class="step-content">
+            <div class="step-box step-box-input">
+              <div class="step-box-label">Input</div>
+              <div style="font-size:13px;color:#374151;">${step.input}</div>
+            </div>
+            <div class="step-box step-box-process">
+              <div class="step-box-label">Process</div>
+              <ul>${step.process.map(p => `<li>${p}</li>`).join('')}</ul>
+            </div>
+            <div class="step-box step-box-output" style="background:${flow.light};">
+              <div class="step-box-label">Output</div>
+              <div style="font-size:13px;color:${flow.color};">${step.output}</div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+      
+      const navHtml = flow.steps.map((step, i) => `
+        <div class="step-nav-item" data-step="${step.num}" style="background:${flow.light};color:#374151;">
+          ${step.num}. ${step.title.split(' ').slice(0,2).join(' ')}
+        </div>
+        ${i < flow.steps.length - 1 ? `<span class="step-nav-arrow" style="color:${flow.color};">’</span>` : ''}
+      `).join('');
+      
+      detailEl.innerHTML = `
+        <div class="flow-detail-header">
+          <div>
+            <span class="flow-detail-badge" style="background:${flow.light};color:${flow.color};">${flow.category}</span>
+            <div class="flow-detail-title">${flow.title}</div>
+          </div>
+          <button class="close-btn" onclick="closeFlow('${flowId}')">×</button>
+        </div>
+        <div class="step-nav">${navHtml}</div>
+        <div class="steps-container">${stepsHtml}</div>
+      `;
+      
+      detailEl.style.borderColor = flow.color;
+      detailEl.classList.add('visible');
+      
+      // Add step click handlers
+      detailEl.querySelectorAll('.step-card').forEach(card => {
+        card.addEventListener('click', () => toggleStep(flowId, parseInt(card.dataset.step)));
+      });
+      
+      detailEl.querySelectorAll('.step-nav-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleStep(flowId, parseInt(item.dataset.step));
+        });
+      });
+    }
+
+    function closeFlow(flowId) {
+      const flow = flowData[flowId];
+      const detailEl = document.getElementById(`detail-${flowId}`);
+      const cardEl = document.querySelector(`[data-flow="${flowId}"]`);
+      
+      detailEl.classList.remove('visible');
+      cardEl.classList.remove('active');
+      cardEl.style.borderColor = '#e5e7eb';
+      cardEl.style.backgroundColor = 'white';
+      
+      if (activeFlow === flowId) {
+        activeFlow = null;
+        activeStep = null;
+      }
+    }
+
+    function toggleStep(flowId, stepNum) {
+      const flow = flowData[flowId];
+      const detailEl = document.getElementById(`detail-${flowId}`);
+      
+      if (activeStep === stepNum) {
+        activeStep = null;
+      } else {
+        activeStep = stepNum;
+      }
+      
+      detailEl.querySelectorAll('.step-card').forEach(card => {
+        const isActive = parseInt(card.dataset.step) === activeStep;
+        card.classList.toggle('active', isActive);
+        if (isActive) {
+          card.style.borderColor = flow.color;
+        } else {
+          card.style.borderColor = '#e5e7eb';
+        }
+      });
+      
+      detailEl.querySelectorAll('.step-nav-item').forEach(item => {
+        const isActive = parseInt(item.dataset.step) === activeStep;
+        item.style.background = isActive ? flow.color : flow.light;
+        item.style.color = isActive ? 'white' : '#374151';
+      });
+    }
+
+    // Initialize click handlers
+    document.querySelectorAll('.flow-card').forEach(card => {
+      card.addEventListener('click', () => renderFlowDetail(card.dataset.flow));
+    });
+  </script>
+</body>
+</html>

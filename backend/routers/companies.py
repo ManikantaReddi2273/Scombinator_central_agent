@@ -1,0 +1,118 @@
+"""
+Company management routes
+"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from database import get_db
+from models.admin import Admin
+from models.company import Company
+from schemas.company import CompanyRegisterRequest, CompanyResponse
+from services.tenant import tenant_service
+from services.audit_logger import audit_logger_service
+from auth.jwt import get_current_admin
+import traceback
+
+router = APIRouter(prefix="/api/companies", tags=["Companies"])
+
+
+@router.post("/register", response_model=CompanyResponse)
+async def register_company(
+    company_data: CompanyRegisterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Register a new company (called by n8n after OAuth)
+    This endpoint receives tokens from n8n and creates company record
+    """
+    # Check if company already exists
+    existing = await tenant_service.get_company_by_email(db, company_data.email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Company with email {company_data.email} already exists"
+        )
+    
+    # Create company
+    company = await tenant_service.create_company(
+        db=db,
+        name=company_data.company_name,
+        email=company_data.email,
+        access_token=company_data.access_token,
+        refresh_token=company_data.refresh_token,
+        n8n_credential_id=company_data.n8n_credential_id,
+        expires_in=company_data.expires_in or 3600
+    )
+    
+    # Log company addition
+    await audit_logger_service.log_company_added(
+        db=db,
+        company_id=str(company.company_id),
+        company_name=company.name
+    )
+    
+    return CompanyResponse(
+        company_id=company.company_id,
+        name=company.name,
+        email=company.email,
+        n8n_credential_id=company.n8n_credential_id,
+        status=company.status,
+        created_at=company.created_at
+    )
+
+
+@router.get("/", response_model=list[CompanyResponse])
+async def list_companies(
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """List all companies (admin only)"""
+    try:
+        result = await db.execute(select(Company).order_by(Company.created_at.desc()))
+        companies = result.scalars().all()
+        
+        return [
+            CompanyResponse(
+                company_id=c.company_id,
+                name=c.name,
+                email=c.email,
+                n8n_credential_id=c.n8n_credential_id,
+                status=c.status,
+                created_at=c.created_at
+            )
+            for c in companies
+        ]
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error listing companies: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching companies: {str(e)}"
+        )
+
+
+@router.get("/{company_id}", response_model=CompanyResponse)
+async def get_company(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """Get company by ID"""
+    company = await tenant_service.get_company_by_id(db, company_id)
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found"
+        )
+    
+    return CompanyResponse(
+        company_id=company.company_id,
+        name=company.name,
+        email=company.email,
+        n8n_credential_id=company.n8n_credential_id,
+        status=company.status,
+        created_at=company.created_at
+    )
+

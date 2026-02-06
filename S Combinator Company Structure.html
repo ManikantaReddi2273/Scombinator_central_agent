@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S Combinator Structure</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0f0f14;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+
+        /* Main Hub */
+        .hub {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .hub-box {
+            display: inline-block;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            border-radius: 20px;
+            padding: 30px 50px;
+            box-shadow: 0 20px 60px rgba(79, 70, 229, 0.3);
+        }
+
+        .hub-box h1 {
+            color: #fff;
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .hub-box .tagline {
+            color: rgba(255,255,255,0.8);
+            font-size: 0.9rem;
+        }
+
+        /* Core Functions */
+        .core-functions {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .function-pill {
+            background: #1a1a24;
+            border: 1px solid #2d2d3d;
+            border-radius: 30px;
+            padding: 10px 24px;
+            color: #a5b4fc;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        /* Connector Lines */
+        .connector-section {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .main-line {
+            width: 4px;
+            height: 40px;
+            background: linear-gradient(to bottom, #4f46e5, #374151);
+        }
+
+        .branch-container {
+            display: flex;
+            justify-content: center;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .horizontal-line {
+            position: absolute;
+            top: 0;
+            width: 600px;
+            height: 4px;
+            background: #374151;
+            border-radius: 2px;
+        }
+
+        .vertical-branches {
+            display: flex;
+            justify-content: space-between;
+            width: 600px;
+        }
+
+        .branch {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .branch-line {
+            width: 4px;
+            height: 40px;
+            background: #374151;
+        }
+
+        /* Sector Cards */
+        .sectors {
+            display: flex;
+            justify-content: center;
+            gap: 100px;
+            margin-top: 10px;
+        }
+
+        .sector {
+            text-align: center;
+        }
+
+        .sector-header {
+            background: #1a1a24;
+            border: 2px solid #374151;
+            border-radius: 16px;
+            padding: 16px 40px;
+            margin-bottom: 20px;
+        }
+
+        .sector-header.sports {
+            border-color: #f97316;
+            background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05));
+        }
+
+        .sector-header.education {
+            border-color: #10b981;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
+        }
+
+        .sector-icon {
+            font-size: 1.5rem;
+            margin-bottom: 6px;
+        }
+
+        .sector-title {
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .sector-header.sports .sector-title {
+            color: #fb923c;
+        }
+
+        .sector-header.education .sector-title {
+            color: #34d399;
+        }
+
+        /* Spin-off connector */
+        .spinoff-connector {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .spinoff-line {
+            width: 3px;
+            height: 25px;
+            background: #374151;
+        }
+
+        .spinoff-branch {
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .spinoff-h-line {
+            width: 80px;
+            height: 3px;
+            background: #374151;
+            margin-top: 0;
+        }
+
+        .spinoff-v-line {
+            width: 3px;
+            height: 30px;
+            background: #374151;
+        }
+
+        /* Company Cards */
+        .companies {
+            display: flex;
+            gap: 20px;
+        }
+
+        .company-card {
+            background: #1a1a24;
+            border: 1px solid #2d2d3d;
+            border-radius: 12px;
+            padding: 20px 24px;
+            min-width: 160px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .company-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .company-card.sports {
+            border-color: rgba(249, 115, 22, 0.3);
+        }
+
+        .company-card.sports:hover {
+            border-color: #f97316;
+        }
+
+        .company-card.education {
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .company-card.education:hover {
+            border-color: #10b981;
+        }
+
+        .company-number {
+            font-size: 0.7rem;
+            color: #6b7280;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .company-name {
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .company-card.sports .company-name {
+            color: #fdba74;
+        }
+
+        .company-card.education .company-name {
+            color: #6ee7b7;
+        }
+
+        .company-desc {
+            color: #6b7280;
+            font-size: 0.75rem;
+        }
+
+        /* Flow Label */
+        .flow-label {
+            text-align: center;
+            margin: 30px 0 20px 0;
+        }
+
+        .flow-label span {
+            background: #1a1a24;
+            border: 1px dashed #374151;
+            border-radius: 20px;
+            padding: 8px 20px;
+            color: #6b7280;
+            font-size: 0.8rem;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid #1f1f2e;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #6b7280;
+            font-size: 0.8rem;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.purple {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        }
+
+        .legend-dot.orange {
+            background: #f97316;
+        }
+
+        .legend-dot.green {
+            background: #10b981;
+        }
+
+        /* Tree structure for cleaner look */
+        .tree-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .tree-connector {
+            width: 4px;
+            height: 50px;
+            background: linear-gradient(to bottom, #4f46e5, #374151);
+        }
+
+        .tree-horizontal {
+            width: 500px;
+            height: 4px;
+            background: #374151;
+            position: relative;
+        }
+
+        .tree-branches {
+            display: flex;
+            justify-content: space-between;
+            width: 500px;
+        }
+
+        .tree-branch {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .tree-branch-line {
+            width: 4px;
+            height: 30px;
+            background: #374151;
+        }
+
+        /* Company tree */
+        .company-tree {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 15px;
+        }
+
+        .company-branch-line {
+            width: 3px;
+            height: 20px;
+            background: #374151;
+        }
+
+        .company-horizontal {
+            width: 140px;
+            height: 3px;
+            background: #374151;
+        }
+
+        .company-vertical-lines {
+            display: flex;
+            justify-content: space-between;
+            width: 140px;
+        }
+
+        .company-v-line {
+            width: 3px;
+            height: 20px;
+            background: #374151;
+        }
+
+        .company-cards-row {
+            display: flex;
+            gap: 20px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Main Hub -->
+        <div class="hub">
+            <div class="hub-box">
+                <h1>S Combinator</h1>
+                <div class="tagline">Product Studio • Incubator • Accelerator</div>
+            </div>
+        </div>
+
+        <!-- Core Functions -->
+        <div class="core-functions">
+            <div class="function-pill">🛠️ Build MVPs</div>
+            <div class="function-pill">🚀 Accelerate</div>
+            <div class="function-pill">💰 Invest</div>
+        </div>
+
+        <!-- Flow Label -->
+        <div class="flow-label">
+            <span>↓ Spin-off into Independent Companies ↓</span>
+        </div>
+
+        <!-- Tree Structure -->
+        <div class="tree-section">
+            <div class="tree-connector"></div>
+            <div class="tree-horizontal"></div>
+            <div class="tree-branches">
+                <!-- Sports Branch -->
+                <div class="tree-branch">
+                    <div class="tree-branch-line"></div>
+                    <div class="sector-header sports">
+                        <div class="sector-icon">🏏</div>
+                        <div class="sector-title">Sports</div>
+                    </div>
+                    <div class="company-tree">
+                        <div class="company-branch-line"></div>
+                        <div class="company-horizontal"></div>
+                        <div class="company-vertical-lines">
+                            <div class="company-v-line"></div>
+                            <div class="company-v-line"></div>
+                        </div>
+                        <div class="company-cards-row">
+                            <div class="company-card sports">
+                                <div class="company-number">Spin-off 1</div>
+                                <div class="company-name">Sports Co. 1</div>
+                                <div class="company-desc">Sports Venture</div>
+                            </div>
+                            <div class="company-card sports">
+                                <div class="company-number">Spin-off 2</div>
+                                <div class="company-name">Sports Co. 2</div>
+                                <div class="company-desc">Sports Venture</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Education Branch -->
+                <div class="tree-branch">
+                    <div class="tree-branch-line"></div>
+                    <div class="sector-header education">
+                        <div class="sector-icon">📚</div>
+                        <div class="sector-title">Education</div>
+                    </div>
+                    <div class="company-tree">
+                        <div class="company-branch-line"></div>
+                        <div class="company-horizontal"></div>
+                        <div class="company-vertical-lines">
+                            <div class="company-v-line"></div>
+                            <div class="company-v-line"></div>
+                        </div>
+                        <div class="company-cards-row">
+                            <div class="company-card education">
+                                <div class="company-number">Spin-off 1</div>
+                                <div class="company-name">Edu Co. 1</div>
+                                <div class="company-desc">EdTech Venture</div>
+                            </div>
+                            <div class="company-card education">
+                                <div class="company-number">Spin-off 2</div>
+                                <div class="company-name">Edu Co. 2</div>
+                                <div class="company-desc">EdTech Venture</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-dot purple"></div>
+                <span>Parent Studio</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot orange"></div>
+                <span>Sports Spin-offs</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot green"></div>
+                <span>Education Spin-offs</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

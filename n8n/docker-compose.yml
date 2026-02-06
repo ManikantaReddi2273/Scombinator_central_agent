@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: s-combinator-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Basic Authentication (Change password!)
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=R@ddi2273
+      
+      # Database (SQLite - simple for development)
+      - DB_TYPE=sqlite
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+      
+      # Encryption key (IMPORTANT: Generate your own 32-character key!)
+      # Generate using: -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object {[char]$_})
+      - N8N_ENCRYPTION_KEY=LhKz4ScuRTlj1WYx8f3ECso250tOZwMm
+      
+      # Timezone
+      - GENERIC_TIMEZONE=UTC
+      
+      # Webhook URL (for production, use your domain)
+      - WEBHOOK_URL=http://localhost:5678/
+      
+      # Execution settings
+      - EXECUTIONS_PROCESS=main
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
+      - EXECUTIONS_DATA_MAX_AGE=168  # Keep execution data for 7 days
+      
+    volumes:
+      # Persist n8n data (workflows, credentials, settings)
+      - ./data:/home/node/.n8n
+      
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+
