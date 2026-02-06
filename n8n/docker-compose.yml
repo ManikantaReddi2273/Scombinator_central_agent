@@ -27,6 +27,10 @@ services:
       # Webhook URL (for production, use your domain)
       - WEBHOOK_URL=http://localhost:5678/
       
+      # Google OAuth Credentials (from scombinator_creditional_google_oauth.json)
+      - GOOGLE_CLIENT_ID=407115728261-22odd5dsa5grrtmdqena19bs5id0l0a5.apps.googleusercontent.com
+      - GOOGLE_CLIENT_SECRET=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
+      
       # Execution settings
       - EXECUTIONS_PROCESS=main
       - EXECUTIONS_DATA_SAVE_ON_ERROR=all

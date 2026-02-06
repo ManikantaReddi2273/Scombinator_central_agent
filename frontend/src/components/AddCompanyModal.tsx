@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
-import { X, Building2, Mail, Lock } from 'lucide-react'
+import { X, Building2, Mail } from 'lucide-react'
+import { companiesAPI } from '../lib/api'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface AddCompanyModalProps {
   isOpen: boolean
@@ -12,55 +14,37 @@ interface AddCompanyModalProps {
 
 export default function AddCompanyModal({ isOpen, onClose }: AddCompanyModalProps) {
   const [companyName, setCompanyName] = useState('')
+  const [companyEmail, setCompanyEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   if (!isOpen) return null
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!companyName.trim()) return
+    if (!companyName.trim() || !companyEmail.trim()) return
 
     setLoading(true)
+    setError(null)
+    
     try {
-      // Get Google OAuth credentials from environment variables
-      // These should be set in your .env file
-      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
-      const redirectUri = import.meta.env.VITE_N8N_CALLBACK_URL || 'http://localhost:5678/webhook/oauth-callback'
+      // Step 1: Create company directly via backend API
+      await companiesAPI.create({
+        name: companyName.trim(),
+        email: companyEmail.trim()
+      })
       
-      if (!clientId) {
-        console.error('Google Client ID not configured. Please set VITE_GOOGLE_CLIENT_ID in .env file')
-        alert('OAuth configuration missing. Please contact administrator.')
-        setLoading(false)
-        return
-      }
+      // Refresh companies list
+      await queryClient.invalidateQueries({ queryKey: ['companies'] })
       
-      // Store company name in sessionStorage for later use (backup)
-      sessionStorage.setItem('pending_company_name', companyName.trim())
-      
-      // Build Google OAuth URL
-      // The 'state' parameter will contain the company name
-      // After OAuth, Google redirects to n8n webhook with code and state
-      const scopes = [
-        'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/gmail.send',
-        'https://www.googleapis.com/auth/drive.readonly',
-        'https://www.googleapis.com/auth/drive.file'
-      ].join(' ')
-      
-      const googleOAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-        `client_id=${encodeURIComponent(clientId)}&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-        `response_type=code&` +
-        `scope=${encodeURIComponent(scopes)}&` +
-        `state=${encodeURIComponent(companyName.trim())}&` +
-        `access_type=offline&` + // Required to get refresh token
-        `prompt=consent` // Force consent screen to ensure refresh token
-      
-      // Redirect to Google OAuth
-      window.location.href = googleOAuthUrl
-    } catch (error) {
-      console.error('Error initiating OAuth:', error)
-      alert('Failed to initiate OAuth. Please try again.')
+      // Close modal and reset form
+      setCompanyName('')
+      setCompanyEmail('')
+      onClose()
+    } catch (err: any) {
+      console.error('Error creating company:', err)
+      setError(err.response?.data?.detail || 'Failed to create company. Please try again.')
       setLoading(false)
     }
   }
@@ -83,15 +67,21 @@ export default function AddCompanyModal({ isOpen, onClose }: AddCompanyModalProp
             </div>
             <div>
               <CardTitle className="text-gray-900">Add New Company</CardTitle>
-              <CardDescription>Connect Gmail and Drive for automation</CardDescription>
+            <CardDescription>Register a new company (OAuth can be connected later)</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+            )}
+            
             <div className="space-y-2">
               <label htmlFor="companyName" className="text-sm font-medium text-gray-700">
-                Company Name
+                Company Name *
               </label>
               <div className="relative">
                 <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -104,26 +94,31 @@ export default function AddCompanyModal({ isOpen, onClose }: AddCompanyModalProp
                   className="pl-10 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-gray-400"
                   required
                   autoFocus
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="companyEmail" className="text-sm font-medium text-gray-700">
+                Company Email *
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Input
+                  id="companyEmail"
+                  type="email"
+                  placeholder="e.g., contact@alphatech.com"
+                  value={companyEmail}
+                  onChange={(e) => setCompanyEmail(e.target.value)}
+                  className="pl-10 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 focus:border-gray-400"
+                  required
+                  disabled={loading}
                 />
               </div>
               <p className="text-xs text-gray-500">
-                Enter the company name. You'll connect their Gmail and Drive next.
+                This email will be used for Gmail integration. You can connect OAuth later.
               </p>
-            </div>
-
-            <div className="pt-4 border-t border-gray-200">
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
-                <Mail className="w-5 h-5 text-gray-600 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900 mb-1">What happens next?</p>
-                  <ul className="text-xs text-gray-700 space-y-1">
-                    <li>• You'll be redirected to Google OAuth</li>
-                    <li>• Sign in with the company's Gmail account</li>
-                    <li>• Grant access to Gmail and Drive</li>
-                    <li>• Company will be automatically registered</li>
-                  </ul>
-                </div>
-              </div>
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -139,14 +134,14 @@ export default function AddCompanyModal({ isOpen, onClose }: AddCompanyModalProp
               <Button
                 type="submit"
                 className="flex-1 bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-900 shadow-md"
-                disabled={loading || !companyName.trim()}
+                disabled={loading || !companyName.trim() || !companyEmail.trim()}
               >
                 {loading ? (
-                  <>Connecting...</>
+                  <>Creating...</>
                 ) : (
                   <>
-                    <Lock className="w-4 h-4 mr-2" />
-                    Connect Gmail & Drive
+                    <Building2 className="w-4 h-4 mr-2" />
+                    Create Company
                   </>
                 )}
               </Button>

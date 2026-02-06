@@ -1,0 +1,242 @@
+{
+  "name": "Company OAuth Connection",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "oauth-connect",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "id": "webhook-node",
+      "name": "Webhook",
+      "webhookId": "company-oauth-connect-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract OAuth callback parameters from webhook\nconst webhookData = $input.first().json;\nconsole.log('Full webhook data:', JSON.stringify(webhookData, null, 2));\n\nconst query = webhookData.query || {};\nconst code = query.code;\nconst state = query.state; // This contains company_id\nconst error = query.error;\n\nconsole.log('Extracted code:', code);\nconsole.log('Extracted company_id (state):', state);\n\n// Handle OAuth errors\nif (error) {\n  throw new Error(`OAuth error: ${error} - ${query.error_description || ''}`);\n}\n\n// Validate code exists\nif (!code) {\n  throw new Error('No authorization code received from Google');\n}\n\n// Validate company_id exists\nif (!state) {\n  throw new Error('No company_id received in state parameter');\n}\n\n// IMPORTANT: redirect_uri must EXACTLY match what was used in the initial OAuth request\nconst redirectUri = 'http://localhost:5678/webhook/oauth-connect';\n\nconsole.log('Using redirect_uri:', redirectUri);\nconsole.log('Company ID:', state);\n\n// Return data for token exchange\nreturn {\n  code: code,\n  company_id: state, // company_id from state parameter\n  redirect_uri: redirectUri\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "id": "extract-code",
+      "name": "Extract OAuth Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get Google OAuth credentials\n// Note: process.env is not available in n8n Code nodes sandbox\n// Reading from the credentials JSON file structure\n// Values match scombinator_creditional_google_oauth.json and docker-compose.yml\nconst credentials = {\n  client_id: '407115728261-22odd5dsa5grrtmdqena19bs5id0l0a5.apps.googleusercontent.com',\n  client_secret: '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'\n};\n\n// Validate credentials exist\nif (!credentials.client_id || !credentials.client_secret) {\n  throw new Error('Google OAuth credentials not configured');\n}\n\n// Get data from previous node\nconst data = $input.first().json;\n\nconsole.log('=== TOKEN EXCHANGE REQUEST ===');\nconsole.log('Code:', data.code);\nconsole.log('Redirect URI:', data.redirect_uri);\nconsole.log('Company ID:', data.company_id);\nconsole.log('Client ID loaded:', !!credentials.client_id);\nconsole.log('Client Secret loaded:', !!credentials.client_secret);\n\n// Return data with credentials\nreturn {\n  ...data,\n  client_id: credentials.client_id,\n  client_secret: credentials.client_secret\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        300
+      ],
+      "id": "get-credentials",
+      "name": "Get Credentials"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://oauth2.googleapis.com/token",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "code",
+              "value": "={{ $json.code }}"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $json.client_id }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $json.client_secret }}"
+            },
+            {
+              "name": "redirect_uri",
+              "value": "={{ $json.redirect_uri }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "authorization_code"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        780,
+        300
+      ],
+      "id": "exchange-tokens",
+      "name": "Exchange Code for Tokens"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract tokens from Google OAuth response\nconst tokenResponse = $input.first().json;\n\n// Check if token exchange failed (error response)\nif (tokenResponse.error) {\n  throw new Error(`Token exchange failed: ${tokenResponse.error} - ${tokenResponse.error_description || ''}`);\n}\n\n// Validate token response\nif (!tokenResponse || !tokenResponse.access_token) {\n  throw new Error('Failed to get access token. Response: ' + JSON.stringify(tokenResponse));\n}\n\n// Get company_id from previous node\nconst previousData = $('Extract OAuth Code').item.json;\nconst companyId = previousData.company_id;\n\nif (!companyId) {\n  throw new Error('Company ID not found in previous node data');\n}\n\n// Extract token data\nconst accessToken = tokenResponse.access_token;\nconst refreshToken = tokenResponse.refresh_token || '';\nconst expiresIn = tokenResponse.expires_in || 3600;\n\n// Validate access token is not empty\nif (!accessToken || accessToken.trim() === '') {\n  throw new Error('Access token is empty or invalid');\n}\n\n// Generate credential ID\nconst credentialId = 'google_cred_' + Date.now();\n\nconsole.log('=== EXTRACTED TOKEN DATA ===');\nconsole.log('Company ID:', companyId);\nconsole.log('Access token length:', accessToken.length);\nconsole.log('Refresh token exists:', !!refreshToken);\nconsole.log('Expires in:', expiresIn);\n\n// Return data for backend call\nreturn {\n  company_id: companyId,\n  access_token: accessToken,\n  refresh_token: refreshToken,\n  expires_in: expiresIn,\n  n8n_credential_id: credentialId\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ],
+      "id": "extract-tokens",
+      "name": "Extract Tokens"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/companies/{{ $json.company_id }}/connect-oauth",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  access_token: $json.access_token,\n  refresh_token: $json.refresh_token,\n  n8n_credential_id: $json.n8n_credential_id,\n  expires_in: $json.expires_in\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1220,
+        300
+      ],
+      "id": "connect-oauth",
+      "name": "Connect OAuth to Company"
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "={{ 'http://localhost:3000/companies?success=true&oauth_connected=true' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1440,
+        300
+      ],
+      "id": "redirect-frontend",
+      "name": "Redirect to Frontend"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract OAuth Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract OAuth Code": {
+      "main": [
+        [
+          {
+            "node": "Get Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Credentials": {
+      "main": [
+        [
+          {
+            "node": "Exchange Code for Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exchange Code for Tokens": {
+      "main": [
+        [
+          {
+            "node": "Extract Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Tokens": {
+      "main": [
+        [
+          {
+            "node": "Connect OAuth to Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Connect OAuth to Company": {
+      "main": [
+        [
+          {
+            "node": "Redirect to Frontend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "America/New_York"
+  },
+  "versionId": "oauth-connect-version-1",
+  "meta": {
+    "instanceId": "oauth-connect-instance"
+  },
+  "id": "company-oauth-connect"
+}
+

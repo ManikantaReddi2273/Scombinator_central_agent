@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Log what we're about to send to Google\nconst data = $input.first().json;\n\nconsole.log('=== TOKEN EXCHANGE REQUEST ===');\nconsole.log('Code:', data.code);\nconsole.log('Redirect URI:', data.redirect_uri);\nconsole.log('Company Name:', data.company_name);\n\n// Pass through the data unchanged\nreturn data;"
+        "jsCode": "// Get Google OAuth credentials\n// Note: process.env is not available in n8n Code nodes sandbox\n// Reading from the credentials JSON file structure\n// Values match scombinator_creditional_google_oauth.json and docker-compose.yml\nconst credentials = {\n  client_id: '407115728261-22odd5dsa5grrtmdqena19bs5id0l0a5.apps.googleusercontent.com',\n  client_secret: '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'\n};\n\n// Validate credentials exist\nif (!credentials.client_id || !credentials.client_secret) {\n  throw new Error('Google OAuth credentials not configured');\n}\n\n// Get data from previous node\nconst data = $input.first().json;\n\nconsole.log('=== TOKEN EXCHANGE REQUEST ===');\nconsole.log('Code:', data.code);\nconsole.log('Redirect URI:', data.redirect_uri);\nconsole.log('Company Name:', data.company_name);\nconsole.log('Client ID loaded:', !!credentials.client_id);\nconsole.log('Client Secret loaded:', !!credentials.client_secret);\n\n// Return data with credentials\nreturn {\n  ...data,\n  client_id: credentials.client_id,\n  client_secret: credentials.client_secret\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -40,8 +40,8 @@
         580,
         300
       ],
-      "id": "debug-before-exchange",
-      "name": "Debug Before Exchange"
+      "id": "get-credentials",
+      "name": "Get Credentials"
     },
     {
       "parameters": {
@@ -58,11 +58,11 @@
             },
             {
               "name": "client_id",
-              "value": "407115728261-22odd5dsa5grrtmdqena19bs5id0l0a5.apps.googleusercontent.com"
+              "value": "={{ $json.client_id }}"
             },
             {
               "name": "client_secret",
-              "value": "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"
+              "value": "={{ $json.client_secret }}"
             },
             {
               "name": "redirect_uri",
@@ -149,7 +149,7 @@
       ],
       "id": "get-user-info",
       "name": "Get User Email"
-    },
+    },  
     {
       "parameters": {
         "jsCode": "// Get user email from Google userinfo API\nlet userInfo = $input.first().json;\n\n// Check if we got a wrapped response\nif (userInfo.body && typeof userInfo.body === 'object') {\n  console.log('Got wrapped response, extracting body');\n  userInfo = userInfo.body;\n}\n\n// Validate user info\nif (!userInfo || !userInfo.email) {\n  throw new Error('Failed to get user email. Response: ' + JSON.stringify(userInfo));\n}\n\n// Get token data from previous node - using the Extract Tokens node\nconst tokenData = $('Extract Tokens').item.json;\n\n// Combine all data for backend registration\nreturn {\n  company_name: tokenData.company_name,\n  email: userInfo.email,\n  user_name: userInfo.name || '',\n  access_token: tokenData.access_token,\n  refresh_token: tokenData.refresh_token,\n  n8n_credential_id: tokenData.n8n_credential_id,\n  expires_in: tokenData.expires_in,\n  scope: tokenData.scope\n};"
@@ -166,7 +166,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/api/companies/register",
+        "url": "http://host.docker.internal:8000/api/companies/register",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
@@ -186,7 +186,7 @@
               "responseFormat": "json",
               "fullResponse": false
             }
-          },
+        },
           "timeout": 10000
         }
       },
@@ -232,14 +232,14 @@
       "main": [
         [
           {
-            "node": "Debug Before Exchange",
+            "node": "Get Credentials",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Debug Before Exchange": {
+    "Get Credentials": {
       "main": [
         [
           {

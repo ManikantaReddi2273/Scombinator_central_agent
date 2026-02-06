@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>S Combinator — Technical Architecture Blueprint</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    
+    .container { max-width: 1400px; margin: 0 auto; padding: 32px 24px; }
+    
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .header h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .header p { color: #94a3b8; font-size: 16px; }
+    
+    /* Architecture Flow */
+    .architecture {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin-bottom: 48px;
+    }
+    
+    .layer {
+      position: relative;
+    }
+    
+    .layer-card {
+      border-radius: 12px;
+      padding: 24px;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .layer-card:hover {
+      transform: translateY(-2px);
+    }
+    
+    .layer-badge {
+      position: absolute;
+      top: -10px;
+      left: 24px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+    
+    .layer-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .layer-title .icon {
+      font-size: 24px;
+    }
+    
+    .layer-subtitle {
+      font-size: 13px;
+      opacity: 0.8;
+      margin-bottom: 16px;
+    }
+    
+    .layer-content {
+      display: none;
+    }
+    .layer-content.visible {
+      display: block;
+      animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .layer-items {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    
+    .layer-item {
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+    }
+    .layer-item strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.7;
+    }
+    
+    /* Arrow connectors */
+    .connector {
+      display: flex;
+      justify-content: center;
+      padding: 8px 0;
+    }
+    .connector-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .connector-line {
+      width: 2px;
+      height: 20px;
+      background: linear-gradient(to bottom, var(--from-color), var(--to-color));
+    }
+    .connector-label {
+      font-size: 10px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 2px 8px;
+      background: #1e293b;
+      border-radius: 4px;
+    }
+    .connector-head {
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 8px solid var(--to-color);
+    }
+    
+    /* Specific layer colors */
+    .layer-tenants .layer-card {
+      background: linear-gradient(135deg, #1e3a5f, #1e293b);
+      border: 1px solid #334155;
+    }
+    .layer-tenants .layer-badge { background: #3b82f6; color: white; }
+    
+    .layer-n8n .layer-card {
+      background: linear-gradient(135deg, #7c3aed20, #1e293b);
+      border: 2px solid #7c3aed;
+    }
+    .layer-n8n .layer-badge { background: #7c3aed; color: white; }
+    
+    .layer-code .layer-card {
+      background: linear-gradient(135deg, #10b98120, #1e293b);
+      border: 2px solid #10b981;
+    }
+    .layer-code .layer-badge { background: #10b981; color: white; }
+    
+    .layer-db .layer-card {
+      background: linear-gradient(135deg, #f59e0b20, #1e293b);
+      border: 2px solid #f59e0b;
+    }
+    .layer-db .layer-badge { background: #f59e0b; color: #1e293b; }
+    
+    .layer-ui .layer-card {
+      background: linear-gradient(135deg, #ec489920, #1e293b);
+      border: 2px solid #ec4899;
+    }
+    .layer-ui .layer-badge { background: #ec4899; color: white; }
+    
+    .layer-send .layer-card {
+      background: linear-gradient(135deg, #06b6d420, #1e293b);
+      border: 2px solid #06b6d4;
+    }
+    .layer-send .layer-badge { background: #06b6d4; color: #1e293b; }
+    
+    /* Example flows */
+    .example-flows {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    .example-flows-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      opacity: 0.6;
+      margin-bottom: 12px;
+    }
+    .flow-example {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      padding: 8px 12px;
+      background: rgba(124, 58, 237, 0.2);
+      border-radius: 6px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .flow-step {
+      background: rgba(255,255,255,0.15);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+    .flow-arrow {
+      color: #7c3aed;
+    }
+    
+    /* Loop indicator */
+    .loop-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 16px;
+      margin: 16px 0;
+      background: linear-gradient(90deg, transparent, #1e293b, transparent);
+      border-radius: 8px;
+    }
+    .loop-line {
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #06b6d4, #7c3aed, transparent);
+    }
+    .loop-text {
+      font-size: 12px;
+      color: #94a3b8;
+      white-space: nowrap;
+    }
+    
+    /* Checklist Section */
+    .checklist-section {
+      margin-top: 48px;
+    }
+    .checklist-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .checklist-header h2 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .checklist-header p {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    
+    .checklist-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 900px) {
+      .checklist-grid { grid-template-columns: 1fr; }
+    }
+    
+    .checklist-column {
+      border-radius: 16px;
+      padding: 24px;
+    }
+    
+    .checklist-n8n {
+      background: linear-gradient(135deg, #7c3aed15, #1e293b);
+      border: 1px solid #7c3aed50;
+    }
+    .checklist-code {
+      background: linear-gradient(135deg, #10b98115, #1e293b);
+      border: 1px solid #10b98150;
+    }
+    
+    .checklist-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .checklist-title .badge {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    .checklist-n8n .badge { background: #7c3aed; }
+    .checklist-code .badge { background: #10b981; }
+    
+    .checklist-subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 20px;
+    }
+    
+    .checklist-group {
+      margin-bottom: 20px;
+    }
+    .checklist-group-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .checklist-n8n .checklist-group-title { color: #a78bfa; }
+    .checklist-code .checklist-group-title { color: #6ee7b7; }
+    
+    .checklist-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+      padding: 8px 0;
+      color: #cbd5e1;
+    }
+    .checklist-item::before {
+      content: "✓";
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    .checklist-n8n .checklist-item::before {
+      background: #7c3aed30;
+      color: #a78bfa;
+    }
+    .checklist-code .checklist-item::before {
+      background: #10b98130;
+      color: #6ee7b7;
+    }
+    
+    /* Warning box */
+    .warning-box {
+      background: #ef444420;
+      border: 1px solid #ef4444;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .warning-box-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #fca5a5;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .warning-item {
+      font-size: 12px;
+      color: #fca5a5;
+      padding: 4px 0;
+      padding-left: 20px;
+      position: relative;
+    }
+    .warning-item::before {
+      content: "✗";
+      position: absolute;
+      left: 0;
+      color: #ef4444;
+    }
+    
+    /* Rule of thumb */
+    .rule-box {
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      border: 2px solid #334155;
+      border-radius: 12px;
+      padding: 24px;
+      margin-top: 32px;
+      text-align: center;
+    }
+    .rule-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .rule-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 600px) {
+      .rule-content { grid-template-columns: 1fr; }
+    }
+    .rule-item {
+      padding: 16px;
+      border-radius: 8px;
+    }
+    .rule-item-n8n {
+      background: #7c3aed20;
+      border: 1px solid #7c3aed50;
+    }
+    .rule-item-code {
+      background: #10b98120;
+      border: 1px solid #10b98150;
+    }
+    .rule-question {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    .rule-answer {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .rule-item-n8n .rule-answer { color: #a78bfa; }
+    .rule-item-code .rule-answer { color: #6ee7b7; }
+    
+    /* Click hint */
+    .click-hint {
+      font-size: 11px;
+      color: #64748b;
+      text-align: right;
+      margin-bottom: 4px;
+    }
+    
+    /* Expand indicator */
+    .expand-indicator {
+      float: right;
+      font-size: 12px;
+      opacity: 0.5;
+      transition: transform 0.3s;
+    }
+    .layer-card.expanded .expand-indicator {
+      transform: rotate(180deg);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>S Combinator — Technical Architecture</h1>
+      <p>System layers, data flow, and responsibility boundaries</p>
+    </div>
+    
+    <p class="click-hint">Click each layer to expand details ↓</p>
+    
+    <!-- Architecture Diagram -->
+    <div class="architecture">
+      
+      <!-- Layer 1: Tenants -->
+      <div class="layer layer-tenants">
+        <div class="layer-card" onclick="toggleLayer(this)">
+          <span class="layer-badge">Layer 1</span>
+          <div class="layer-title">
+            <span class="icon">🏢</span>
+            TENANTS / COMPANIES (Workspaces)
+            <span class="expand-indicator">▼</span>
+          </div>
+          <div class="layer-subtitle">Company A Gmail/Drive | Company B Gmail/Drive | ...</div>
+          <div class="layer-content">
+            <div class="layer-items">
+              <div class="layer-item">
+                <strong>Gmail Inbox</strong>
+                Inbound emails per company, mapped to tenant
+              </div>
+              <div class="layer-item">
+                <strong>Google Drive</strong>
+                Templates, resumes, contracts per tenant
+              </div>
+              <div class="layer-item">
+                <strong>Workspace Isolation</strong>
+                Each company = separate data silo
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Connector -->
+      <div class="connector">
+        <div class="connector-arrow" style="--from-color: #334155; --to-color: #7c3aed;">
+          <div class="connector-line"></div>
+          <div class="connector-label">Inbound events & Outbound triggers</div>
+          <div class="connector-head"></div>
+        </div>
+      </div>
+      
+      <!-- Layer 2: n8n -->
+      <div class="layer layer-n8n">
+        <div class="layer-card" onclick="toggleLayer(this)">
+          <span class="layer-badge">Layer 2</span>
+          <div class="layer-title">
+            <span class="icon">⚡</span>
+            n8n (SELF-HOSTED) — THE CONDUCTOR
+            <span class="expand-indicator">▼</span>
+          </div>
+          <div class="layer-subtitle">Watches Gmail/Drive • Schedules, retries, routes • Calls your APIs • Waits for approval</div>
+          <div class="layer-content">
+            <div class="layer-items">
+              <div class="layer-item">
+                <strong>Triggers</strong>
+                Watch Gmail, Drive uploads, scheduled runs, manual buttons
+              </div>
+              <div class="layer-item">
+                <strong>Orchestration</strong>
+                Step ordering, routing, retries, rate limiting
+              </div>
+              <div class="layer-item">
+                <strong>Integrations</strong>
+                Gmail API, Drive API, your HTTP endpoints
+              </div>
+              <div class="layer-item">
+                <strong>Waiting</strong>
+                Pause workflows until approval flag changes
+              </div>
+            </div>
+            <div class="example-flows">
+              <div class="example-flows-title">Example Flows</div>
+              <div class="flow-example">
+                <span class="flow-step">New Email</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Fetch</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Call AI</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Save</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Notify UI</span>
+              </div>
+              <div class="flow-example">
+                <span class="flow-step">Lead CSV</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">For Each</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Call AI</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Queue Drafts</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Schedule</span>
+              </div>
+              <div class="flow-example">
+                <span class="flow-step">Resume PDF</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Extract Text</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Call AI</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Score</span>
+                <span class="flow-arrow">→</span>
+                <span class="flow-step">Shortlist</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Connector -->
+      <div class="connector">
+        <div class="connector-arrow" style="--from-color: #7c3aed; --to-color: #10b981;">
+          <div class="connector-line"></div>
+          <div class="connector-label">HTTP calls / Webhooks</div>
+          <div class="connector-head"></div>
+        </div>
+      </div>
+      
+      <!-- Layer 3: Your Code -->
+      <div class="layer layer-code">
+        <div class="layer-card" onclick="toggleLayer(this)">
+          <span class="layer-badge">Layer 3</span>
+          <div class="layer-title">
+            <span class="icon">🧠</span>
+            YOUR CODE (APIs) — THE "AI BRAIN"
+            <span class="expand-indicator">▼</span>
+          </div>
+          <div class="layer-subtitle">Business logic, AI intelligence, policy enforcement, governance</div>
+          <div class="layer-content">
+            <div class="layer-items">
+              <div class="layer-item">
+                <strong>1. Tenant & Policy Service</strong>
+                Inbox → tenant mapping • Allowed Drive folders • Template registry • Guardrails (what AI can/can't say)
+              </div>
+              <div class="layer-item">
+                <strong>2. Intelligence Service (LLM)</strong>
+                Classify, score, summarize, suggest action, draft • Strict JSON outputs • Confidence gating • Redaction before LLM
+              </div>
+              <div class="layer-item">
+                <strong>3. Document/Template Service</strong>
+                Fetch template snippets (allowlisted) • Store docs back to tenant Drive • Version metadata
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Connector -->
+      <div class="connector">
+        <div class="connector-arrow" style="--from-color: #10b981; --to-color: #f59e0b;">
+          <div class="connector-line"></div>
+          <div class="connector-label">Read / Write</div>
+          <div class="connector-head"></div>
+        </div>
+      </div>
+      
+      <!-- Layer 4: Operational DB -->
+      <div class="layer layer-db">
+        <div class="layer-card" onclick="toggleLayer(this)">
+          <span class="layer-badge">Layer 4</span>
+          <div class="layer-title">
+            <span class="icon">🗄️</span>
+            OPERATIONAL DB (CENTRAL)
+            <span class="expand-indicator">▼</span>
+          </div>
+          <div class="layer-subtitle">Single source of truth for all operational state</div>
+          <div class="layer-content">
+            <div class="layer-items">
+              <div class="layer-item">
+                <strong>Email State</strong>
+                Thread metadata, classifications, priority scores, summaries
+              </div>
+              <div class="layer-item">
+                <strong>Drafts & Approvals</strong>
+                Draft versions, approval status, edit history
+              </div>
+              <div class="layer-item">
+                <strong>Hiring Pipeline</strong>
+                Candidate records, fit scores, interview state, decisions
+              </div>
+              <div class="layer-item">
+                <strong>Audit Logs</strong>
+                Sources used, who approved, what was sent, timestamps
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Connector -->
+      <div class="connector">
+        <div class="connector-arrow" style="--from-color: #f59e0b; --to-color: #ec4899;">
+          <div class="connector-line"></div>
+          <div class="connector-label">Query / Update</div>
+          <div class="connector-head"></div>
+        </div>
+      </div>
+      
+      <!-- Layer 5: Review UI -->
+      <div class="layer layer-ui">
+        <div class="layer-card" onclick="toggleLayer(this)">
+          <span class="layer-badge">Layer 5</span>
+          <div class="layer-title">
+            <span class="icon">🖥️</span>
+            REVIEW UI (DASHBOARD)
+            <span class="expand-indicator">▼</span>
+          </div>
+          <div class="layer-subtitle">Human-in-the-loop interface for review, edit, and approval</div>
+          <div class="layer-content">
+            <div class="layer-items">
+              <div class="layer-item">
+                <strong>Priority Queue</strong>
+                Cross-company unified queue, sorted by score
+              </div>
+              <div class="layer-item">
+                <strong>Summaries</strong>
+                One-line executive summaries, suggested actions
+              </div>
+              <div class="layer-item">
+                <strong>Draft Editor</strong>
+                Edit draft → Approve → Send
+              </div>
+              <div class="layer-item">
+                <strong>Hiring View</strong>
+                Candidate shortlist, fit scores, scheduling actions
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Connector -->
+      <div class="connector">
+        <div class="connector-arrow" style="--from-color: #ec4899; --to-color: #06b6d4;">
+          <div class="connector-line"></div>
+          <div class="connector-label">Approved Actions</div>
+          <div class="connector-head"></div>
+        </div>
+      </div>
+      
+      <!-- Layer 6: Sending -->
+      <div class="layer layer-send">
+        <div class="layer-card" onclick="toggleLayer(this)">
+          <span class="layer-badge">Layer 6</span>
+          <div class="layer-title">
+            <span class="icon">📤</span>
+            SENDING (via n8n + Gmail)
+            <span class="expand-indicator">▼</span>
+          </div>
+          <div class="layer-subtitle">Executes approved sends, completes the loop</div>
+          <div class="layer-content">
+            <div class="layer-items">
+              <div class="layer-item">
+                <strong>Gmail API Send</strong>
+                n8n calls Gmail API to send approved drafts
+              </div>
+              <div class="layer-item">
+                <strong>Reply Loop</strong>
+                Replies come back to inbox and re-enter the flow
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Loop back indicator -->
+      <div class="loop-indicator">
+        <div class="loop-line"></div>
+        <div class="loop-text">↻ Replies loop back to Inbox → n8n triggers again</div>
+        <div class="loop-line"></div>
+      </div>
+    </div>
+    
+    <!-- Checklist Section -->
+    <div class="checklist-section">
+      <div class="checklist-header">
+        <h2>What Lives in n8n vs What Lives in Code</h2>
+        <p>Clear boundaries for maintainability and governance</p>
+      </div>
+      
+      <div class="checklist-grid">
+        <!-- n8n Column -->
+        <div class="checklist-column checklist-n8n">
+          <div class="checklist-title">
+            <span class="badge">n8n</span>
+            Orchestration / Plumbing
+          </div>
+          <div class="checklist-subtitle">The "when" and "in what order"</div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">Triggers & Intake</div>
+            <div class="checklist-item">New email arrives in Gmail inbox</div>
+            <div class="checklist-item">New file uploaded to Drive folder (resumes, templates)</div>
+            <div class="checklist-item">Manual trigger buttons ("run outreach sequence now")</div>
+            <div class="checklist-item">Scheduled runs (daily digest at 9 AM, follow-up checks)</div>
+          </div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">Workflow Coordination</div>
+            <div class="checklist-item">Step ordering: Fetch → Call API → Store → Notify</div>
+            <div class="checklist-item">Routing: if "Sales" then path A, if "Hiring" then path B</div>
+            <div class="checklist-item">Retries: automatic retry on transient failures</div>
+            <div class="checklist-item">Rate limiting: simple throttling (sleep/wait between calls)</div>
+            <div class="checklist-item">Waiting: pause workflow until approval state changes</div>
+            <div class="checklist-item">Notifications: Slack/Email alert if workflow fails</div>
+          </div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">Integrations</div>
+            <div class="checklist-item">Calling Gmail API to fetch/send</div>
+            <div class="checklist-item">Calling Drive API to fetch/upload</div>
+            <div class="checklist-item">Pushing updates to your DB endpoints</div>
+            <div class="checklist-item">Pulling lead lists from Google Sheets</div>
+          </div>
+          
+          <div class="warning-box">
+            <div class="warning-box-title">⚠️ What NOT to do in n8n</div>
+            <div class="warning-item">Don't embed complex tenant logic in n8n</div>
+            <div class="warning-item">Don't store secrets scattered across many workflows</div>
+            <div class="warning-item">Don't implement "policy rules" in 50 different nodes</div>
+          </div>
+        </div>
+        
+        <!-- Code Column -->
+        <div class="checklist-column checklist-code">
+          <div class="checklist-title">
+            <span class="badge">Your Code</span>
+            Business Logic / Brain / Governance
+          </div>
+          <div class="checklist-subtitle">The "what does this mean" and "what should we do"</div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">Tenant Isolation & Policy</div>
+            <div class="checklist-item">Inbox → tenant mapping (source of truth)</div>
+            <div class="checklist-item">Allowed Drive folders (whitelist) per tenant</div>
+            <div class="checklist-item">Template registry + "approved only" enforcement</div>
+            <div class="checklist-item">"Never promise pricing unless from approved sources"</div>
+            <div class="checklist-item">Confidence gating rules (if confidence < X → human review)</div>
+          </div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">AI Logic</div>
+            <div class="checklist-item">Classification schema (function/intent/urgency/impact)</div>
+            <div class="checklist-item">Priority scoring rules (deterministic, auditable)</div>
+            <div class="checklist-item">Zero-context summarization + format enforcement</div>
+            <div class="checklist-item">Action recommendation (reply/ask/schedule/hold/escalate)</div>
+            <div class="checklist-item">Draft generation: template + variables + brand tone</div>
+            <div class="checklist-item">Redaction/minimization before sending to LLM</div>
+          </div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">Data & Audit</div>
+            <div class="checklist-item">Operational DB schema and all writes/reads</div>
+            <div class="checklist-item">Draft versioning + approvals tracking</div>
+            <div class="checklist-item">Audit logs: what snippets used, who approved, what sent</div>
+            <div class="checklist-item">Duplicate prevention / idempotency keys</div>
+          </div>
+          
+          <div class="checklist-group">
+            <div class="checklist-group-title">Document Handling & UI</div>
+            <div class="checklist-item">Extract content from templates (Docs/PDF) normalized</div>
+            <div class="checklist-item">Save contracts to correct tenant Drive folder</div>
+            <div class="checklist-item">Priority queue, summaries, draft editor, approvals UI</div>
+            <div class="checklist-item">Candidate shortlist, fit score view, scheduling</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Rule of Thumb -->
+      <div class="rule-box">
+        <div class="rule-title">📐 Practical Rule of Thumb</div>
+        <div class="rule-content">
+          <div class="rule-item rule-item-n8n">
+            <div class="rule-question">If a feature answers...</div>
+            <div class="rule-answer">"When? In what order? What to call next?"</div>
+            <div style="margin-top:8px; font-size:13px; color:#a78bfa;">→ Put it in n8n</div>
+          </div>
+          <div class="rule-item rule-item-code">
+            <div class="rule-question">If a feature answers...</div>
+            <div class="rule-answer">"What does this mean? What should we do? What should we say?"</div>
+            <div style="margin-top:8px; font-size:13px; color:#6ee7b7;">→ Put it in your code</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function toggleLayer(card) {
+      const content = card.querySelector('.layer-content');
+      const isExpanded = content.classList.contains('visible');
+      
+      // Close all other layers
+      document.querySelectorAll('.layer-content').forEach(c => c.classList.remove('visible'));
+      document.querySelectorAll('.layer-card').forEach(c => c.classList.remove('expanded'));
+      
+      // Toggle this one
+      if (!isExpanded) {
+        content.classList.add('visible');
+        card.classList.add('expanded');
+      }
+    }
+    
+    // Auto-expand n8n layer on load to show example
+    document.addEventListener('DOMContentLoaded', () => {
+      const n8nCard = document.querySelector('.layer-n8n .layer-card');
+      if (n8nCard) {
+        toggleLayer(n8nCard);
+      }
+    });
+  </script>
+</body>
+</html>

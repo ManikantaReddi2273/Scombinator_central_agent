@@ -15,12 +15,12 @@ class Company(Base):
     __tablename__ = "companies"
     
     company_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
     email = Column(String(255), nullable=False, unique=True, index=True)
     
-    # Encrypted tokens (stored as TEXT)
-    encrypted_access_token = Column(Text, nullable=False)
-    encrypted_refresh_token = Column(Text, nullable=False)
+    # Encrypted tokens (stored as TEXT) - nullable for two-step registration
+    encrypted_access_token = Column(Text, nullable=True)
+    encrypted_refresh_token = Column(Text, nullable=True)
     access_token_expires_at = Column(DateTime(timezone=True), nullable=True)
     
     # n8n reference (for mapping)

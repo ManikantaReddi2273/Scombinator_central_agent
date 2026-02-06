@@ -47,6 +47,14 @@ export const authAPI = {
 export const companiesAPI = {
   list: () => api.get('/api/companies/'),
   get: (id: string) => api.get(`/api/companies/${id}`),
+  create: (data: { name: string; email: string }) => 
+    api.post('/api/companies/', data),
+  connectOAuth: (companyId: string, data: {
+    access_token: string;
+    refresh_token: string;
+    n8n_credential_id?: string;
+    expires_in?: number;
+  }) => api.post(`/api/companies/${companyId}/connect-oauth`, data),
 }
 
 export const emailsAPI = {

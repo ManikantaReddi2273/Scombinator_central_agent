@@ -23,6 +23,14 @@ class CompanyCreate(BaseModel):
     email: EmailStr
 
 
+class OAuthConnectRequest(BaseModel):
+    """OAuth connection request for Step 2"""
+    access_token: str
+    refresh_token: str
+    n8n_credential_id: Optional[str] = None
+    expires_in: Optional[int] = 3600
+
+
 class CompanyResponse(BaseModel):
     """Company response schema"""
     company_id: UUID
@@ -31,6 +39,7 @@ class CompanyResponse(BaseModel):
     n8n_credential_id: Optional[str]
     status: str
     created_at: datetime
+    has_oauth_connected: bool = False
     
     class Config:
         from_attributes = True
