@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from config import settings
-from routers import auth, companies, emails, drafts
+from routers import auth, companies, emails, drafts, dashboard
 import traceback
 
 app = FastAPI(
@@ -106,6 +106,7 @@ app.include_router(auth.router)
 app.include_router(companies.router)
 app.include_router(emails.router)
 app.include_router(drafts.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/")

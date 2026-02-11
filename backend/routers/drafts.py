@@ -17,30 +17,16 @@ import uuid
 router = APIRouter(prefix="/api/drafts", tags=["Drafts"])
 
 
-@router.get("/pending", response_model=list[DraftResponse])
-async def get_pending_drafts(
-    company_id: Optional[str] = Query(None, description="Filter by company ID"),
-    limit: int = Query(20, ge=1, le=100, description="Number of results"),
-    db: AsyncSession = Depends(get_db),
-    admin: Admin = Depends(get_current_admin)
+@router.get("/approved", response_model=list[DraftResponse])
+async def get_approved_drafts(
+    limit: int = Query(10, ge=1, le=100, description="Number of results"),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Get pending drafts awaiting approval (admin only)
-    This is the main queue for admin review
+    Get approved drafts ready to send (called by n8n)
+    No admin auth required - n8n calls this directly
     """
-    from uuid import UUID
-    
-    query = select(Draft).where(Draft.status == "pending")
-    
-    if company_id:
-        try:
-            query = query.where(Draft.company_id == UUID(company_id))
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid company_id format"
-            )
-    
+    query = select(Draft).where(Draft.status == "approved")
     query = query.order_by(desc(Draft.created_at)).limit(limit)
     
     result = await db.execute(query)
@@ -62,35 +48,150 @@ async def get_pending_drafts(
     ]
 
 
-@router.get("/{draft_id}", response_model=DraftResponse)
-async def get_draft(
-    draft_id: str,
+@router.get("/pending", response_model=list[dict])
+async def get_pending_drafts(
+    company_id: Optional[str] = Query(None, description="Filter by company ID"),
+    limit: int = Query(20, ge=1, le=100, description="Number of results"),
     db: AsyncSession = Depends(get_db),
     admin: Admin = Depends(get_current_admin)
 ):
-    """Get draft by ID (admin only)"""
-    result = await db.execute(
-        select(Draft).where(Draft.id == uuid.UUID(draft_id))
-    )
-    draft = result.scalar_one_or_none()
+    """
+    Get pending drafts awaiting approval (admin only)
+    This is the main queue for admin review
+    Returns drafts with email and company information
+    """
+    from uuid import UUID
+    from models.email import Email
+    from models.company import Company
     
-    if not draft:
+    query = (
+        select(Draft, Email, Company)
+        .join(Email, Draft.email_id == Email.id, isouter=True)
+        .join(Company, Draft.company_id == Company.company_id)
+        .where(Draft.status == "pending")
+    )
+    
+    if company_id:
+        try:
+            query = query.where(Draft.company_id == UUID(company_id))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid company_id format"
+            )
+    
+    query = query.order_by(desc(Draft.created_at)).limit(limit)
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    drafts_with_context = []
+    for draft, email, company in rows:
+        draft_dict = {
+            "id": str(draft.id),
+            "company_id": str(draft.company_id),
+            "email_id": str(draft.email_id) if draft.email_id else None,
+            "subject": draft.subject,
+            "body": draft.body,
+            "status": draft.status,
+            "version": draft.version,
+            "template_used": draft.template_used,
+            "created_at": draft.created_at,
+            "company_name": company.name if company else None,
+            "company_email": company.email if company else None,
+        }
+        
+        # Add email context if available
+        if email:
+            draft_dict["email"] = {
+                "id": str(email.id),
+                "subject": email.subject,
+                "from_email": email.from_email,
+                "to_email": email.to_email,
+                "body": email.body,
+                "priority_score": email.priority_score,
+                "executive_summary": email.executive_summary,
+                "function": email.function,
+                "intent": email.intent,
+                "urgency": email.urgency,
+                "impact": email.impact,
+                "confidence": email.confidence,
+                "recommended_action": email.recommended_action,
+                "thread_id": email.thread_id,
+                "created_at": email.created_at.isoformat()
+            }
+        
+        drafts_with_context.append(draft_dict)
+    
+    return drafts_with_context
+
+
+@router.get("/{draft_id}", response_model=dict)
+async def get_draft(
+    draft_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get draft by ID with email and company context
+    No auth required - n8n calls this directly, but admin can also use it
+    """
+    from models.email import Email
+    from models.company import Company
+    
+    result = await db.execute(
+        select(Draft, Email, Company)
+        .join(Email, Draft.email_id == Email.id, isouter=True)
+        .join(Company, Draft.company_id == Company.company_id)
+        .where(Draft.id == uuid.UUID(draft_id))
+    )
+    row = result.first()
+    
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Draft not found"
         )
     
-    return DraftResponse(
-        id=draft.id,
-        company_id=draft.company_id,
-        email_id=draft.email_id,
-        subject=draft.subject,
-        body=draft.body,
-        status=draft.status,
-        version=draft.version,
-        template_used=draft.template_used,
-        created_at=draft.created_at
-    )
+    draft, email, company = row
+    
+    draft_dict = {
+        "id": str(draft.id),
+        "company_id": str(draft.company_id),
+        "email_id": str(draft.email_id) if draft.email_id else None,
+        "subject": draft.subject,
+        "body": draft.body,
+        "status": draft.status,
+        "version": draft.version,
+        "template_used": draft.template_used,
+        "variables_used": draft.variables_used,
+        "is_edited": draft.is_edited,
+        "original_body": draft.original_body,
+        "created_at": draft.created_at.isoformat(),
+        "company_name": company.name if company else None,
+        "company_email": company.email if company else None,
+    }
+    
+    # Add email context if available
+    if email:
+        draft_dict["email"] = {
+            "id": str(email.id),
+            "subject": email.subject,
+            "from_email": email.from_email,
+            "to_email": email.to_email,
+            "body": email.body,
+            "priority_score": email.priority_score,
+            "executive_summary": email.executive_summary,
+            "function": email.function,
+            "intent": email.intent,
+            "urgency": email.urgency,
+            "impact": email.impact,
+            "confidence": email.confidence,
+            "recommended_action": email.recommended_action,
+            "thread_id": email.thread_id,
+            "created_at": email.created_at.isoformat()
+        }
+    
+    return draft_dict
 
 
 @router.get("/{draft_id}/status", response_model=DraftStatusResponse)
@@ -139,11 +240,12 @@ async def approve_draft(
         )
     
     # Update draft if edited
-    if approve_data.edited_body:
-        draft.body = approve_data.edited_body
-        draft.is_edited = True
+    if approve_data.edited_body and approve_data.edited_body != draft.body:
+        # Save original body before editing (if not already saved)
         if not draft.original_body:
             draft.original_body = draft.body
+        draft.body = approve_data.edited_body
+        draft.is_edited = True
     
     # Approve draft
     draft.status = "approved"
@@ -255,5 +357,49 @@ async def reject_draft(
         "draft_id": str(draft.id),
         "status": "rejected",
         "message": "Draft rejected"
+    }
+
+
+@router.post("/{draft_id}/sent")
+async def mark_draft_sent(
+    draft_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark draft as sent (called by n8n after successfully sending email)
+    No auth required - n8n calls this directly
+    """
+    result = await db.execute(
+        select(Draft).where(Draft.id == uuid.UUID(draft_id))
+    )
+    draft = result.scalar_one_or_none()
+    
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Draft not found"
+        )
+    
+    # Update draft status
+    draft.status = "sent"
+    draft.sent_at = datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(draft)
+    
+    # Log in audit_logs
+    await audit_logger_service.log(
+        db=db,
+        action_type="draft_sent",
+        action_description="Draft sent via email",
+        company_id=str(draft.company_id),
+        draft_id=str(draft.id)
+    )
+    
+    return {
+        "draft_id": str(draft.id),
+        "status": "sent",
+        "sent_at": draft.sent_at.isoformat(),
+        "message": "Draft marked as sent"
     }
 

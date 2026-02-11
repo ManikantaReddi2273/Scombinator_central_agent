@@ -3,9 +3,10 @@ import { draftsAPI } from '../lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
-import { formatDate, getStatusColor } from '../lib/utils'
-import { Check, X, Eye, Edit } from 'lucide-react'
+import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils'
+import { Check, X, Eye, Edit, Building2, Mail } from 'lucide-react'
 import { useState } from 'react'
+import EmailDetail from '../components/EmailDetail'
 
 export default function Drafts() {
   const [selectedDraft, setSelectedDraft] = useState<string | null>(null)
@@ -43,6 +44,7 @@ export default function Drafts() {
 
   const pendingDrafts = drafts?.filter((d: any) => d.status === 'pending') || []
   const approvedDrafts = drafts?.filter((d: any) => d.status === 'approved') || []
+  const [showEmailDetail, setShowEmailDetail] = useState(false)
 
   return (
     <div className="space-y-6">
@@ -74,16 +76,52 @@ export default function Drafts() {
                     }}
                   >
                     <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <h3 className="font-semibold text-gray-900 mb-1">{draft.subject}</h3>
+                          <div className="flex items-start justify-between mb-2">
+                            <h3 className="font-semibold text-gray-900">{draft.subject}</h3>
+                            {draft.email?.priority_score && (
+                              <div
+                                className={`px-2 py-1 rounded text-white text-xs font-bold ${getPriorityColor(
+                                  draft.email.priority_score
+                                )}`}
+                              >
+                                {draft.email.priority_score}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Executive Summary */}
+                          {draft.email?.executive_summary && (
+                            <p className="text-sm text-gray-700 mb-2 line-clamp-1">
+                              {draft.email.executive_summary}
+                            </p>
+                          )}
+                          
                           <p className="text-sm text-gray-600 line-clamp-2 mb-2">{draft.body}</p>
-                          <div className="flex items-center gap-2">
+                          
+                          <div className="flex items-center gap-3 flex-wrap">
                             <Badge
                               className={`${getStatusColor(draft.status)} text-white text-xs`}
                             >
                               {draft.status}
                             </Badge>
+                            {draft.company_name && (
+                              <div className="flex items-center gap-1 text-xs text-gray-600">
+                                <Building2 className="w-3 h-3" />
+                                {draft.company_name}
+                              </div>
+                            )}
+                            {draft.email?.function && (
+                              <Badge variant="outline" className="text-xs border-gray-300 text-gray-700">
+                                {draft.email.function}
+                              </Badge>
+                            )}
+                            {draft.email?.intent && (
+                              <Badge variant="outline" className="text-xs border-gray-300 text-gray-700">
+                                {draft.email.intent}
+                              </Badge>
+                            )}
                             <span className="text-xs text-gray-500">
                               {formatDate(draft.created_at)}
                             </span>
@@ -135,61 +173,101 @@ export default function Drafts() {
         </div>
 
         {/* Draft Editor */}
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 space-y-4">
           {selectedDraftData ? (
-            <Card className="bg-white border-gray-200 sticky top-20 shadow-lg">
-              <CardHeader>
-                <CardTitle className="text-gray-900">Edit & Approve</CardTitle>
-                <CardDescription>Review and edit the draft before approval</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Subject
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedDraftData.subject}
-                    readOnly
-                    className="w-full px-3 py-2 rounded-md bg-[#EAEFEF] border border-gray-300 text-gray-900 text-sm"
+            <>
+              {/* Email Detail Toggle */}
+              {selectedDraftData.email && (
+                <Card className="bg-white border-gray-200">
+                  <CardContent className="p-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setShowEmailDetail(!showEmailDetail)}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      {showEmailDetail ? 'Hide' : 'Show'} Original Email
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Email Detail */}
+              {showEmailDetail && selectedDraftData.email && (
+                <div className="max-h-96 overflow-y-auto">
+                  <EmailDetail
+                    email={selectedDraftData.email}
+                    companyName={selectedDraftData.company_name}
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Body
-                  </label>
-                  <textarea
-                    value={editedBody}
-                    onChange={(e) => setEditedBody(e.target.value)}
-                    rows={12}
-                    className="w-full px-3 py-2 rounded-md bg-white border border-gray-300 text-gray-900 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    className="flex-1 bg-green-600 hover:bg-green-700"
-                    onClick={() =>
-                      approveMutation.mutate({
-                        id: selectedDraftData.id,
-                        edited_body: editedBody !== selectedDraftData.body ? editedBody : undefined,
-                      })
-                    }
-                    disabled={approveMutation.isPending}
-                  >
-                    <Check className="w-4 h-4 mr-2" />
-                    Approve
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => rejectMutation.mutate(selectedDraftData.id)}
-                    disabled={rejectMutation.isPending}
-                  >
-                    <X className="w-4 h-4 mr-2" />
-                    Reject
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+              )}
+
+              {/* Draft Editor */}
+              <Card className="bg-white border-gray-200 sticky top-20 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="text-gray-900">Edit & Approve</CardTitle>
+                  <CardDescription>Review and edit the draft before approval</CardDescription>
+                  {selectedDraftData.template_used && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Template: {selectedDraftData.template_used}
+                    </p>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">
+                      Subject
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedDraftData.subject}
+                      readOnly
+                      className="w-full px-3 py-2 rounded-md bg-[#EAEFEF] border border-gray-300 text-gray-900 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">
+                      Body
+                    </label>
+                    <textarea
+                      value={editedBody}
+                      onChange={(e) => setEditedBody(e.target.value)}
+                      rows={12}
+                      className="w-full px-3 py-2 rounded-md bg-white border border-gray-300 text-gray-900 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    />
+                  </div>
+                  {selectedDraftData.is_edited && (
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <Edit className="w-3 h-3" />
+                      This draft has been edited
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      className="flex-1 bg-green-600 hover:bg-green-700"
+                      onClick={() =>
+                        approveMutation.mutate({
+                          id: selectedDraftData.id,
+                          edited_body: editedBody !== selectedDraftData.body ? editedBody : undefined,
+                        })
+                      }
+                      disabled={approveMutation.isPending}
+                    >
+                      <Check className="w-4 h-4 mr-2" />
+                      Approve
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => rejectMutation.mutate(selectedDraftData.id)}
+                      disabled={rejectMutation.isPending}
+                    >
+                      <X className="w-4 h-4 mr-2" />
+                      Reject
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           ) : (
             <Card className="bg-white border-gray-200">
               <CardContent className="p-12 text-center">

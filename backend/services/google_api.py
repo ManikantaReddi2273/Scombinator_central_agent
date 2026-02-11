@@ -141,6 +141,44 @@ class GoogleAPIService:
         
         return policies
 
+    async def get_template_files(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        company_name: str
+    ) -> Dict[str, Optional[str]]:
+        """Get email template files for a company from Drive"""
+        templates = {}
+        
+        # List of template files to fetch
+        template_files = [
+            f"{company_name}/templates/pricing_inquiry_template.txt",
+            f"{company_name}/templates/support_response_template.txt",
+            f"{company_name}/templates/general_response_template.txt",
+            f"{company_name}/templates/application_acknowledgment_template.txt",
+            f"{company_name}/templates/email_template_1.txt",
+            f"{company_name}/templates/email_template_2.txt",
+        ]
+        
+        for file_path in template_files:
+            file_name = file_path.split('/')[-1]
+            folder_path = '/'.join(file_path.split('/')[:-1])
+            
+            try:
+                content = await self.read_drive_file_by_name(
+                    db, company_id, file_name, folder_path
+                )
+                if content:
+                    templates[file_name] = content
+            except Exception as e:
+                # Log error but continue
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Template {file_name} not found in Drive: {str(e)}")
+                continue
+        
+        return templates
+
 
 # Singleton instance
 google_api_service = GoogleAPIService()

@@ -31,6 +31,7 @@ class EmailResponse(BaseModel):
     subject: str
     from_email: str
     to_email: str
+    thread_id: Optional[str] = None
     function: Optional[str]
     intent: Optional[str]
     priority_score: Optional[str]

@@ -13,13 +13,14 @@ async_engine = create_async_engine(
     future=True,
     pool_pre_ping=True,  # Verify connections before using
     pool_recycle=3600,   # Recycle connections after 1 hour
-    pool_timeout=10,     # Timeout when getting connection from pool
-    max_overflow=10,     # Maximum overflow connections
+    pool_timeout=30,     # Timeout when getting connection from pool (increased for high load)
+    pool_size=20,        # Base pool size (increased from default 5)
+    max_overflow=30,     # Maximum overflow connections (increased from 10)
     connect_args={
         "server_settings": {
             "application_name": "s_combinator_backend"
         },
-        "timeout": 10,  # Connection timeout in seconds
+        "timeout": 30,  # Connection timeout in seconds (increased)
     }
 )
 
@@ -45,21 +46,38 @@ Base = declarative_base()
 # Dependency for FastAPI routes
 async def get_db():
     """Get database session"""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            # Check if it's a connection error
-            error_msg = str(e).lower()
-            if "connection" in error_msg or "timeout" in error_msg or "refused" in error_msg:
-                from fastapi import HTTPException, status
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Database connection error. Please check if PostgreSQL is running and the database exists."
-                )
-            raise
-        finally:
-            await session.close()
+    try:
+        async with AsyncSessionLocal() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                # Check if it's a connection error
+                error_msg = str(e).lower()
+                if "connection" in error_msg or "timeout" in error_msg or "refused" in error_msg or "could not connect" in error_msg:
+                    from fastapi import HTTPException, status
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Database connection error: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"Database connection error: {str(e)}. Please check if PostgreSQL is running and DATABASE_URL is correct in .env file."
+                    )
+                raise
+            finally:
+                await session.close()
+    except Exception as e:
+        # This catches errors when creating the session itself
+        from fastapi import HTTPException, status
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to create database session: {str(e)}")
+        error_msg = str(e).lower()
+        if "connection" in error_msg or "timeout" in error_msg or "refused" in error_msg or "could not connect" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Database connection error: {str(e)}. Please check if PostgreSQL is running and DATABASE_URL is correct in .env file."
+            )
+        raise
 

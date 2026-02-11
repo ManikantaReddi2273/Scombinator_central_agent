@@ -208,11 +208,111 @@ async def list_companies(
         )
 
 
+@router.get("/with-oauth", response_model=list[CompanyResponse])
+async def get_companies_with_oauth(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all companies with OAuth connected (called by n8n)
+    No admin auth required - n8n calls this directly
+    """
+    try:
+        result = await db.execute(
+            select(Company)
+            .where(Company.encrypted_access_token.isnot(None))
+            .where(Company.status == "active")
+            .order_by(Company.created_at.desc())
+        )
+        companies = result.scalars().all()
+        
+        return [
+            CompanyResponse(
+                company_id=c.company_id,
+                name=c.name,
+                email=c.email,
+                n8n_credential_id=c.n8n_credential_id,
+                status=c.status,
+                created_at=c.created_at,
+                has_oauth_connected=True
+            )
+            for c in companies
+        ]
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching companies with OAuth: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching companies: {str(e)}"
+        )
+
+
+@router.get("/{company_id}/gmail-token")
+async def get_gmail_token(
+    company_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get valid Gmail access token for company (called by n8n)
+    Returns decrypted, refreshed token ready to use
+    No admin auth required - n8n calls this directly
+    """
+    from services.token_manager import token_manager_service
+    import uuid
+    
+    try:
+        # Get valid token (automatically refreshes if expired)
+        access_token = await token_manager_service.get_valid_token(db, company_id)
+        
+        # Get company email for reference
+        result = await db.execute(
+            select(Company).where(Company.company_id == uuid.UUID(company_id))
+        )
+        company = result.scalar_one_or_none()
+        
+        if not company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Company not found"
+            )
+        
+        return {
+            "company_id": company_id,
+            "company_email": company.email,
+            "access_token": access_token,
+            "expires_at": company.access_token_expires_at.isoformat() if company.access_token_expires_at else None
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValueError as e:
+        # This is already handled above, but catch it here too for safety
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error getting Gmail token: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Return more detailed error in development
+        error_detail = str(e)
+        if settings.DEBUG:
+            error_detail = f"{str(e)}\n\n{traceback.format_exc()}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_detail
+        )
+
+
 @router.get("/{company_id}", response_model=CompanyResponse)
 async def get_company(
     company_id: str,
-    db: AsyncSession = Depends(get_db),
-    admin: Admin = Depends(get_current_admin)
+    db: AsyncSession = Depends(get_db)
 ):
     """Get company by ID"""
     company = await tenant_service.get_company_by_id(db, company_id)

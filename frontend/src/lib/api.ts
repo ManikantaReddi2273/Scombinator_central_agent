@@ -82,3 +82,7 @@ export const draftsAPI = {
   reject: (id: string) => api.post(`/api/drafts/${id}/reject`),
 }
 
+export const dashboardAPI = {
+  getStats: () => api.get('/api/dashboard/stats'),
+}
+

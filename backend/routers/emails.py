@@ -10,6 +10,11 @@ from schemas.email import EmailProcessRequest, EmailResponse
 from services.tenant import tenant_service
 from services.policy_loader import policy_loader_service
 from services.audit_logger import audit_logger_service
+from services.classification_agent import classification_agent
+from services.priority_scorer_agent import priority_scorer_agent
+from services.summarizer_agent import summary_agent
+from services.action_recommender_agent import action_recommender_agent
+from services.draft_generator_agent import draft_generator_agent
 from models.email import Email
 from models.draft import Draft
 from models.company import Company
@@ -30,10 +35,20 @@ async def process_email(
     Process incoming email (called by n8n)
     This endpoint:
     1. Maps credential_id to company_id
-    2. Loads company policies
-    3. Runs AI classification
-    4. Creates email record and draft
+    2. Checks for duplicate emails (gmail_message_id)
+    3. Creates email record
+    4. Runs classification agents (Phase 2+)
+    5. Creates draft if needed (Phase 5+)
     """
+    email_data = email_request.email_data
+    
+    # Validate required fields
+    if not email_data.get("subject") and not email_data.get("body"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email must have at least subject or body"
+        )
+    
     # Map credential_id to company_id
     company_id = await tenant_service.map_credential_to_company(
         db, email_request.credential_id
@@ -41,7 +56,6 @@ async def process_email(
     
     if not company_id:
         # Try mapping by email
-        email_data = email_request.email_data
         to_email = email_data.get("to", "")
         company = await tenant_service.get_company_by_email(db, to_email)
         if not company:
@@ -51,38 +65,66 @@ async def process_email(
             )
         company_id = str(company.company_id)
     
-    # Load company policies
-    policies = await policy_loader_service.load_policies(db, company_id)
+    # Duplicate Prevention: Check if gmail_message_id already exists
+    gmail_message_id = email_data.get("gmail_message_id")
+    if gmail_message_id:
+        existing_result = await db.execute(
+            select(Email).where(Email.gmail_message_id == gmail_message_id)
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            # Email already processed, return existing record
+            return {
+                "email_id": str(existing.id),
+                "company_id": company_id,
+                "status": "duplicate",
+                "message": "Email already processed"
+            }
     
-    # TODO: Run AI classification (LangGraph)
-    # For now, create basic classification
-    classification = {
-        "function": "Sales",  # Will be replaced by AI
-        "intent": "Inquiry",
-        "urgency": "Soon",
-        "impact": "Revenue",
-        "confidence": "Clear",
-        "priority_score": "75"
-    }
+    # Extract email data
+    subject = email_data.get("subject", "")
+    body = email_data.get("body", "")
+    from_email = email_data.get("from", "")
+    to_email = email_data.get("to", "")
+    thread_id = email_data.get("thread_id")
     
-    # Create email record
+    # Run Classification Agent (Phase 2) - Run agents FIRST to get all data
+    classification = classification_agent.classify(subject, body)
+    
+    # Run Priority Scoring Agent (Phase 3)
+    priority_score = priority_scorer_agent.score_from_classification(classification)
+    classification["priority_score"] = str(priority_score)
+    
+    # Run Summary Agent (Phase 4)
+    executive_summary = summary_agent.generate_summary(
+        subject=subject,
+        body=body,
+        function=classification["function"],
+        intent=classification["intent"]
+    )
+    
+    # Run Action Recommendation Agent (Phase 5)
+    recommended_action = action_recommender_agent.recommend_from_classification(classification)
+    
+    # Create email record with ALL data at once (optimized - single commit)
     email_record = Email(
         id=uuid.uuid4(),
         company_id=uuid.UUID(company_id),
-        subject=email_request.email_data.get("subject", ""),
-        body=email_request.email_data.get("body", ""),
-        from_email=email_request.email_data.get("from", ""),
-        to_email=email_request.email_data.get("to", ""),
-        thread_id=email_request.email_data.get("thread_id"),
-        gmail_message_id=email_request.email_data.get("gmail_message_id"),
+        subject=subject,
+        body=body,
+        from_email=from_email,
+        to_email=to_email,
+        thread_id=thread_id,
+        gmail_message_id=gmail_message_id,
+        # Classification fields set directly
         function=classification["function"],
         intent=classification["intent"],
         urgency=classification["urgency"],
         impact=classification["impact"],
         confidence=classification["confidence"],
-        priority_score=classification["priority_score"],
-        executive_summary="Email inquiry received",  # Will be replaced by AI
-        recommended_action="Reply with template",  # Will be replaced by AI
+        priority_score=str(priority_score),
+        executive_summary=executive_summary,
+        recommended_action=recommended_action,
         classification_metadata=classification
     )
     
@@ -90,38 +132,67 @@ async def process_email(
     await db.commit()
     await db.refresh(email_record)
     
-    # TODO: Generate draft using AI
-    # For now, create placeholder draft
-    draft = Draft(
-        id=uuid.uuid4(),
-        company_id=uuid.UUID(company_id),
-        email_id=email_record.id,
-        subject=f"Re: {email_record.subject}",
-        body="Draft email body will be generated by AI",  # Will be replaced by AI
-        status="pending",
-        version="1.0"
-    )
+    # Generate draft if action is "Reply with template" (Phase 5)
+    draft_id = None
+    if recommended_action == "Reply with template":
+        try:
+            draft_data = await draft_generator_agent.generate_draft(
+                db=db,
+                company_id=company_id,
+                email_subject=subject,
+                email_body=body,
+                from_email=from_email,
+                function=classification["function"],
+                intent=classification["intent"]
+            )
+            
+            # Create draft record
+            draft = Draft(
+                id=uuid.uuid4(),
+                company_id=uuid.UUID(company_id),
+                email_id=email_record.id,
+                subject=draft_data["subject"],
+                body=draft_data["body"],
+                status="pending",
+                version="1.0",
+                template_used=draft_data["template_used"],
+                variables_used=str(draft_data["variables_used"])
+            )
+            
+            db.add(draft)
+            await db.commit()
+            await db.refresh(draft)
+            draft_id = str(draft.id)
+        except Exception as e:
+            # Log error but don't fail email processing
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error generating draft for email {email_record.id}: {str(e)}")
     
-    db.add(draft)
-    await db.commit()
-    await db.refresh(draft)
-    
-    # Log email processing
-    await audit_logger_service.log_email_processed(
-        db=db,
-        company_id=company_id,
-        email_id=str(email_record.id),
-        classification_metadata=classification
-    )
+    # Log email processing (non-blocking - don't fail if logging fails)
+    try:
+        await audit_logger_service.log_email_processed(
+            db=db,
+            company_id=company_id,
+            email_id=str(email_record.id),
+            classification_metadata=classification
+        )
+    except Exception as e:
+        # Log error but don't fail email processing
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Error logging email processing for {email_record.id}: {str(e)}")
     
     return {
         "email_id": str(email_record.id),
-        "draft_id": str(draft.id),
+        "draft_id": draft_id,
         "company_id": company_id,
         "status": "processed",
-        "priority_score": classification["priority_score"],
-        "executive_summary": email_record.executive_summary,
-        "recommended_action": email_record.recommended_action
+        "classification": classification,
+        "priority_score": str(priority_score),
+        "executive_summary": executive_summary,
+        "recommended_action": recommended_action,
+        "message": "Email processed successfully"
     }
 
 
@@ -224,10 +295,12 @@ async def list_emails(
 @router.get("/{email_id}", response_model=EmailResponse)
 async def get_email(
     email_id: str,
-    db: AsyncSession = Depends(get_db),
-    admin: Admin = Depends(get_current_admin)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get email by ID with full details"""
+    """
+    Get email by ID with full details
+    No auth required - n8n calls this directly, but admin can also use it
+    """
     result = await db.execute(
         select(Email).where(Email.id == uuid.UUID(email_id))
     )
@@ -245,6 +318,7 @@ async def get_email(
         subject=email.subject,
         from_email=email.from_email,
         to_email=email.to_email,
+        thread_id=email.thread_id,
         function=email.function,
         intent=email.intent,
         priority_score=email.priority_score,

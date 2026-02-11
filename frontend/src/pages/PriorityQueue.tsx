@@ -1,27 +1,51 @@
 import { useQuery } from '@tanstack/react-query'
-import { emailsAPI } from '../lib/api'
+import { emailsAPI, draftsAPI } from '../lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
-import { formatDate, getPriorityColor } from '../lib/utils'
-import { Mail, Building2, Clock } from 'lucide-react'
+import { Button } from '../components/ui/button'
+import { formatDate, getPriorityColor, getStatusColor } from '../lib/utils'
+import { Mail, Building2, Clock, FileText, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 export default function PriorityQueue() {
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
+  const navigate = useNavigate()
   
   const { data: queue, isLoading } = useQuery({
     queryKey: ['priority-queue', selectedCompany],
     queryFn: () => emailsAPI.getPriorityQueue(50).then((res) => res.data),
   })
 
+  // Fetch drafts for all emails to show draft status
+  const { data: allDrafts } = useQuery({
+    queryKey: ['drafts'],
+    queryFn: () => draftsAPI.list().then((res) => res.data),
+  })
+
+  // Create a map of email_id -> draft
+  const emailDraftMap = new Map()
+  allDrafts?.forEach((draft: any) => {
+    if (draft.email_id) {
+      emailDraftMap.set(draft.email_id, draft)
+    }
+  })
+
   const filteredQueue = selectedCompany
     ? queue?.filter((item: any) => item.company_id === selectedCompany)
     : queue
 
-  const companies = Array.from(new Set(queue?.map((item: any) => ({
-    id: item.company_id,
-    name: item.company_name,
-  })) || []))
+  // Get unique companies by company_id (deduplicate)
+  const companyMap = new Map<string, { id: string; name: string }>()
+  queue?.forEach((item: any) => {
+    if (item.company_id && item.company_name && !companyMap.has(item.company_id)) {
+      companyMap.set(item.company_id, {
+        id: item.company_id,
+        name: item.company_name,
+      })
+    }
+  })
+  const companies = Array.from(companyMap.values())
 
   return (
     <div className="space-y-6">
@@ -97,7 +121,7 @@ export default function PriorityQueue() {
                       </div>
                     </div>
                     <p className="text-gray-700 mb-3">{item.executive_summary}</p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className="border-gray-300 text-gray-700">
                         {item.function}
                       </Badge>
@@ -107,6 +131,19 @@ export default function PriorityQueue() {
                       <Badge variant="outline" className="border-gray-400 text-gray-700">
                         {item.recommended_action}
                       </Badge>
+                      {/* Draft Status */}
+                      {emailDraftMap.has(item.email_id) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs h-6"
+                          onClick={() => navigate(`/drafts?draft=${emailDraftMap.get(item.email_id).id}`)}
+                        >
+                          <FileText className="w-3 h-3 mr-1" />
+                          Draft: {emailDraftMap.get(item.email_id).status}
+                          <ExternalLink className="w-3 h-3 ml-1" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>

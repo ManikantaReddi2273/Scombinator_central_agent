@@ -1,0 +1,477 @@
+{
+  "name": "Send Approved Drafts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/drafts/approved?limit=10",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "id": "get-approved-drafts",
+      "name": "Get Approved Drafts"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Check if we have approved drafts\n// The HTTP Request node returns the array directly in items[0].json\nconst items = $input.all();\n\nconsole.log('Filter Approved Drafts - Input items count:', items.length);\n\nif (items.length === 0) {\n  console.log('No input items found');\n  return [];\n}\n\n// Get the response data - HTTP Request returns array directly\nconst responseData = items[0].json;\n\nconsole.log('Filter Approved Drafts - Response data type:', typeof responseData);\nconsole.log('Filter Approved Drafts - Is array:', Array.isArray(responseData));\n\n// Handle different response structures\nlet drafts = [];\n\nif (Array.isArray(responseData)) {\n  // Response is already an array\n  drafts = responseData;\n  console.log('Filter Approved Drafts - Found array with', drafts.length, 'drafts');\n} else if (responseData && typeof responseData === 'object') {\n  // Response might be wrapped in an object, check common properties\n  if (Array.isArray(responseData.data)) {\n    drafts = responseData.data;\n    console.log('Filter Approved Drafts - Found drafts in data property:', drafts.length);\n  } else if (Array.isArray(responseData.drafts)) {\n    drafts = responseData.drafts;\n    console.log('Filter Approved Drafts - Found drafts in drafts property:', drafts.length);\n  } else if (Array.isArray(responseData.items)) {\n    drafts = responseData.items;\n    console.log('Filter Approved Drafts - Found drafts in items property:', drafts.length);\n  } else {\n    // Try to find any array property\n    const arrayKeys = Object.keys(responseData).filter(key => Array.isArray(responseData[key]));\n    if (arrayKeys.length > 0) {\n      drafts = responseData[arrayKeys[0]];\n      console.log('Filter Approved Drafts - Found drafts in', arrayKeys[0], 'property:', drafts.length);\n    } else {\n      console.log('Filter Approved Drafts - Response is object but no array found:', Object.keys(responseData));\n      // If it's a single draft object, wrap it in array\n      if (responseData.id && responseData.status === 'approved') {\n        drafts = [responseData];\n        console.log('Filter Approved Drafts - Single draft object found, wrapping in array');\n      }\n    }\n  }\n}\n\n// Filter only approved drafts and return as individual items\nconst approvedDrafts = drafts.filter(draft => draft && draft.status === 'approved');\n\nconsole.log('Filter Approved Drafts - Approved drafts count:', approvedDrafts.length);\n\nif (approvedDrafts.length === 0) {\n  console.log('No approved drafts to process');\n  return [];\n}\n\n// Return each draft as a separate item for processing\nreturn approvedDrafts.map(draft => ({ json: draft }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "id": "has-approved-drafts",
+      "name": "Filter Approved Drafts"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/companies/{{ $json.company_id }}/gmail-token",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        200
+      ],
+      "id": "get-gmail-token",
+      "name": "Get Gmail Token from Database"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Merge draft, token, and company data\n// Get draft data from Filter Approved Drafts node\n// Get token data from current item (Get Gmail Token output)\nconst tokenData = $json;\n\n// Get all drafts from Filter Approved Drafts node\nconst allDrafts = $('Filter Approved Drafts').all();\nconst currentCompanyId = tokenData.company_id;\n\n// Find draft matching current company_id\nconst draft = allDrafts.find(item => \n  item.json.company_id === currentCompanyId\n)?.json;\n\nif (!draft) {\n  throw new Error(`No draft found for company_id: ${currentCompanyId}`);\n}\n\nconsole.log('Merge Draft & Token - Draft ID:', draft.id);\nconsole.log('Merge Draft & Token - Company ID:', tokenData.company_id);\nconsole.log('Merge Draft & Token - Has access_token:', !!tokenData.access_token);\n\n// Validate token data\nif (!tokenData || !tokenData.access_token) {\n  throw new Error('Access token is missing from token response');\n}\n\n// Merge: combine draft data with token data\nconst merged = {\n  draft_id: draft.id,\n  draft_subject: draft.subject,\n  draft_body: draft.body,\n  draft_email_id: draft.email_id,\n  company_id: tokenData.company_id,\n  company_email: tokenData.company_email,\n  access_token: tokenData.access_token,\n  expires_at: tokenData.expires_at\n};\n\nif (!merged.draft_id || !merged.draft_email_id) {\n  throw new Error('Draft data incomplete - missing draft_id or email_id');\n}\n\nif (!merged.access_token) {\n  throw new Error('Access token missing - cannot send email');\n}\n\nconsole.log('Merge Draft & Token - Successfully merged');\nreturn merged;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        200
+      ],
+      "id": "merge-draft-token",
+      "name": "Merge Draft & Token"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/emails/{{ $json.draft_email_id }}",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1560,
+        200
+      ],
+      "id": "get-email-info",
+      "name": "Get Email Info"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Prepare email data for Gmail API\n// Get email data from current item (Get Email Info output)\nconst email = $json;\n// Get merged draft & token data from Merge Draft & Token node\nconst merged = $('Merge Draft & Token').item.json;\n\nconsole.log('Prepare Email Message - Email data:', JSON.stringify({\n  email_id: email.id,\n  from_email: email.from_email,\n  thread_id: email.thread_id\n}, null, 2));\n\nconsole.log('Prepare Email Message - Merged data:', JSON.stringify({\n  draft_id: merged.draft_id,\n  draft_subject: merged.draft_subject,\n  company_id: merged.company_id,\n  has_access_token: !!merged.access_token\n}, null, 2));\n\n// Validate required data\nif (!email || !email.from_email) {\n  throw new Error('Email data is missing or invalid');\n}\n\nif (!merged || !merged.draft_id || !merged.draft_subject || !merged.draft_body) {\n  throw new Error('Draft data is missing or invalid');\n}\n\nif (!merged.access_token) {\n  throw new Error('Access token missing - cannot send email');\n}\n\n// Build email message\nconst toEmail = email.from_email;\nconst subject = merged.draft_subject;\nconst body = merged.draft_body;\nconst threadId = email.thread_id || null;\nconst fromEmail = merged.company_email;\n\n// Create email message in RFC 2822 format\nconst message = [\n  `From: ${fromEmail}`,\n  `To: ${toEmail}`,\n  `Subject: ${subject}`,\n  `Content-Type: text/plain; charset=utf-8`,\n  '',\n  body\n].join('\\n');\n\n// Encode message in base64url format (Gmail API requires this)\nconst encodedMessage = Buffer.from(message)\n  .toString('base64')\n  .replace(/\\+/g, '-')\n  .replace(/\\//g, '_')\n  .replace(/=+$/, '');\n\nconst result = {\n  draft_id: merged.draft_id,\n  company_id: merged.company_id,\n  access_token: merged.access_token,\n  to: toEmail,\n  subject: subject,\n  body: body,\n  thread_id: threadId,\n  raw_message: encodedMessage\n};\n\nconsole.log('Prepare Email Message - Result:', JSON.stringify({\n  draft_id: result.draft_id,\n  to: result.to,\n  subject: result.subject,\n  has_thread_id: !!result.thread_id,\n  has_access_token: !!result.access_token\n}, null, 2));\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        200
+      ],
+      "id": "prepare-email",
+      "name": "Prepare Email Message"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Prepare Gmail API request body\nconst emailData = $json;\n\nconsole.log('Prepare Gmail Request - Email data:', JSON.stringify({\n  draft_id: emailData.draft_id,\n  to: emailData.to,\n  subject: emailData.subject,\n  has_thread_id: !!emailData.thread_id,\n  has_raw_message: !!emailData.raw_message,\n  has_access_token: !!emailData.access_token\n}, null, 2));\n\n// Validate required fields\nif (!emailData.raw_message) {\n  throw new Error('raw_message is missing');\n}\n\nif (!emailData.access_token) {\n  throw new Error('access_token is missing');\n}\n\n// Build Gmail API request body\n// Gmail API expects: { raw: \"base64url_encoded_message\", threadId?: \"thread_id\" }\nconst requestBody = {\n  raw: emailData.raw_message\n};\n\n// Only add threadId if it exists and is not null/empty\nif (emailData.thread_id && emailData.thread_id.trim() !== '') {\n  requestBody.threadId = emailData.thread_id;\n  console.log('Prepare Gmail Request - Including threadId:', emailData.thread_id);\n} else {\n  console.log('Prepare Gmail Request - No threadId (new conversation)');\n}\n\nconsole.log('Prepare Gmail Request - Request body:', JSON.stringify({\n  has_raw: !!requestBody.raw,\n  has_threadId: !!requestBody.threadId,\n  raw_length: requestBody.raw ? requestBody.raw.length : 0\n}, null, 2));\n\n// Return data for HTTP Request node\nreturn {\n  draft_id: emailData.draft_id,\n  company_id: emailData.company_id,\n  access_token: emailData.access_token,\n  gmail_request_body: requestBody,\n  gmail_request_body_json: JSON.stringify(requestBody)\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        200
+      ],
+      "id": "prepare-gmail-request",
+      "name": "Prepare Gmail Request Body"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.gmail_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2220,
+        200
+      ],
+      "id": "send-email",
+      "name": "Send Email via Gmail API"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Preserve draft_id after Gmail API call\n// Gmail API response doesn't include draft_id, so get it from previous node\nconst gmailResponse = $json; // Current item (Gmail API response)\nconst originalData = $('Prepare Gmail Request Body').item.json; // Original data with draft_id\n\nconsole.log('Preserve Draft ID - Gmail response:', JSON.stringify({\n  has_id: !!gmailResponse.id,\n  has_threadId: !!gmailResponse.threadId\n}, null, 2));\n\nconsole.log('Preserve Draft ID - Original data:', JSON.stringify({\n  draft_id: originalData.draft_id,\n  company_id: originalData.company_id\n}, null, 2));\n\n// Merge: use Gmail response but preserve draft_id from original data\nreturn {\n  draft_id: originalData.draft_id,\n  company_id: originalData.company_id,\n  gmail_message_id: gmailResponse.id || null,\n  gmail_thread_id: gmailResponse.threadId || null\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        200
+      ],
+      "id": "preserve-draft-id",
+      "name": "Preserve Draft ID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/drafts/{{ $json.draft_id }}/sent",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2660,
+        200
+      ],
+      "id": "mark-draft-sent",
+      "name": "Mark Draft as Sent"
+    },
+    {
+      "parameters": {
+        "continueOnFail": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        200
+      ],
+      "id": "error-handler",
+      "name": "Error Handler"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Approved Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Approved Drafts": {
+      "main": [
+        [
+          {
+            "node": "Filter Approved Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Approved Drafts": {
+      "main": [
+        [
+          {
+            "node": "Get Gmail Token from Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Gmail Token from Database": {
+      "main": [
+        [
+          {
+            "node": "Merge Draft & Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Draft & Token": {
+      "main": [
+        [
+          {
+            "node": "Get Email Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Info": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Gmail Request Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Gmail Request Body": {
+      "main": [
+        [
+          {
+            "node": "Send Email via Gmail API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email via Gmail API": {
+      "main": [
+        [
+          {
+            "node": "Preserve Draft ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve Draft ID": {
+      "main": [
+        [
+          {
+            "node": "Mark Draft as Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Draft as Sent": {
+      "main": [
+        []
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "America/New_York"
+  },
+  "versionId": "send-approved-drafts-v1",
+  "meta": {
+    "instanceId": "send-approved-drafts-instance"
+  },
+  "id": "send-approved-drafts-workflow"
+}
+

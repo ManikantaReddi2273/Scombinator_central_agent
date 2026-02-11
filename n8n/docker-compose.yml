@@ -40,7 +40,11 @@ services:
     volumes:
       # Persist n8n data (workflows, credentials, settings)
       - ./data:/home/node/.n8n
-      
+    
+    # Allow n8n to access host machine services
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5678/healthz"]
       interval: 30s

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { emailsAPI, draftsAPI, companiesAPI } from '../lib/api'
+import { emailsAPI, draftsAPI, companiesAPI, dashboardAPI } from '../lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { TrendingUp, FileText, Building2, Mail, Plus } from 'lucide-react'
 import { formatDate } from '../lib/utils'
@@ -10,6 +10,13 @@ import AddCompanyModal from '../components/AddCompanyModal'
 
 export default function Dashboard() {
   const [isAddCompanyOpen, setIsAddCompanyOpen] = useState(false)
+  // Fetch dashboard statistics from backend
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: () => dashboardAPI.getStats().then((res) => res.data),
+    refetchInterval: 30000, // Refetch every 30 seconds for real-time updates
+  })
+
   const { data: priorityQueue } = useQuery({
     queryKey: ['priority-queue'],
     queryFn: () => emailsAPI.getPriorityQueue(5).then((res) => res.data),
@@ -20,41 +27,31 @@ export default function Dashboard() {
     queryFn: () => draftsAPI.getPending(5).then((res) => res.data),
   })
 
-  const { data: companies } = useQuery({
-    queryKey: ['companies'],
-    queryFn: () => companiesAPI.list().then((res) => res.data),
-  })
-
-  const { data: emails } = useQuery({
-    queryKey: ['emails'],
-    queryFn: () => emailsAPI.list({ limit: 5 }).then((res) => res.data),
-  })
-
   const stats = [
     {
       title: 'Companies',
-      value: companies?.length || 0,
+      value: statsLoading ? '...' : (statsData?.total_companies || 0),
       icon: Building2,
       color: 'text-gray-600',
       bg: 'bg-gray-200',
     },
     {
       title: 'Pending Drafts',
-      value: pendingDrafts?.length || 0,
+      value: statsLoading ? '...' : (statsData?.pending_drafts || 0),
       icon: FileText,
       color: 'text-yellow-500',
       bg: 'bg-yellow-500/10',
     },
     {
       title: 'High Priority',
-      value: priorityQueue?.filter((e: any) => parseInt(e.priority_score) >= 80).length || 0,
+      value: statsLoading ? '...' : (statsData?.high_priority_emails || 0),
       icon: TrendingUp,
       color: 'text-red-500',
       bg: 'bg-red-500/10',
     },
     {
       title: 'Total Emails',
-      value: emails?.length || 0,
+      value: statsLoading ? '...' : (statsData?.total_emails || 0),
       icon: Mail,
       color: 'text-purple-500',
       bg: 'bg-purple-500/10',

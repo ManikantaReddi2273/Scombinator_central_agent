@@ -1,0 +1,471 @@
+{
+  "name": "Email Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8000/api/companies/with-oauth",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "id": "get-companies",
+      "name": "Get Companies with OAuth"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Filter companies with OAuth connected\n// This node runs once for all items and returns an array\nconst companies = $input.all();\nconst companiesWithOAuth = companies\n  .map(item => item.json)\n  .filter(company => company.has_oauth_connected);\n\nconsole.log(`Found ${companiesWithOAuth.length} companies with OAuth connected`);\n\nif (companiesWithOAuth.length === 0) {\n  console.log('No companies with OAuth connected. Workflow will exit.');\n  return [];\n}\n\n// Return array of companies with all needed fields\n// n8n will automatically create one item per array element\nreturn companiesWithOAuth.map(company => ({\n  company_id: company.company_id,\n  company_name: company.name,\n  company_email: company.email,\n  n8n_credential_id: company.n8n_credential_id || null\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "id": "filter-oauth-companies",
+      "name": "Filter Companies with OAuth"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Prepare URL for getting Gmail token\n// This node runs once for each company item automatically\n// n8n processes items one by one when previous node outputs multiple items\n// In 'runOnceForEachItem' mode, use $json to access current item (NOT $input.all())\n\nconsole.log('=== Prepare Token Request - Debug ===');\nconsole.log('$json:', JSON.stringify($json, null, 2));\n\n// Access data from current item (n8n processes items one by one)\n// In runOnceForEachItem mode, $json contains the current item\nconst companyData = $json;\n\nif (!companyData) {\n  console.error('ERROR: No company data found!');\n  console.error('$json:', $json);\n  throw new Error('No company data received from previous node');\n}\n\nconsole.log('Company data found:', JSON.stringify(companyData, null, 2));\n\nconst companyId = companyData.company_id;\nconst credentialId = companyData.n8n_credential_id;\n\nif (!companyId) {\n  console.error('ERROR: company_id is missing!');\n  console.error('Full companyData:', JSON.stringify(companyData, null, 2));\n  throw new Error('company_id is missing from input data');\n}\n\nif (!credentialId) {\n  console.warn(`Company ${companyId} has no n8n_credential_id. Skipping.`);\n  return null;\n}\n\n// Use host.docker.internal for Docker container to access host\n// Works on Docker Desktop (Windows/Mac), for Linux might need 172.17.0.1\nconst url = `http://host.docker.internal:8000/api/companies/${companyId}/gmail-token`;\n\nconsole.log(`Getting Gmail token for company: ${companyId} (${companyData.company_name})`);\nconsole.log(`Credential ID: ${credentialId}`);\nconsole.log(`URL: ${url}`);\n\nreturn {\n  company_id: companyId,\n  company_name: companyData.company_name,\n  company_email: companyData.company_email,\n  n8n_credential_id: credentialId,\n  token_url: url\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "id": "prepare-token-request",
+      "name": "Prepare Token Request"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.token_url }}",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000,
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "id": "get-gmail-token",
+      "name": "Get Gmail Token from Database"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Merge token data with company data for Gmail API call\n// The backend returns: {company_id, company_email, access_token, expires_at}\n// We need to get company_name and n8n_credential_id from Prepare Token Request\n\nconst tokenData = $json;\n\nconsole.log('Merge Token Data - Token response:', JSON.stringify(tokenData, null, 2));\n\nif (!tokenData || !tokenData.access_token) {\n  console.error('ERROR: Token data missing or invalid');\n  console.error('Token data:', JSON.stringify(tokenData, null, 2));\n  throw new Error('access_token is missing from token response');\n}\n\n// The backend response includes company_id and company_email\n// We need to get company_name and n8n_credential_id from Prepare Token Request node\n// In runOnceForEachItem mode, use $('NodeName').item.json to get corresponding item\nconst previousData = $('Prepare Token Request').item.json;\n\nconsole.log('Merge Token Data - Previous node data:', JSON.stringify(previousData, null, 2));\n\n// Merge: use token response for token data, previous node for company metadata\nconst merged = {\n  company_id: tokenData.company_id || previousData?.company_id,\n  company_name: previousData?.company_name || 'Unknown',\n  company_email: tokenData.company_email || previousData?.company_email,\n  n8n_credential_id: previousData?.n8n_credential_id || null,\n  access_token: tokenData.access_token,\n  expires_at: tokenData.expires_at\n};\n\nif (!merged.company_id) {\n  console.error('ERROR: Company ID missing after merge');\n  console.error('Merged data:', JSON.stringify(merged, null, 2));\n  throw new Error('Company ID is missing - cannot proceed');\n}\n\nconsole.log('Merge Token Data - Successfully merged:', JSON.stringify({\n  company_id: merged.company_id,\n  company_name: merged.company_name,\n  has_access_token: !!merged.access_token,\n  has_credential_id: !!merged.n8n_credential_id\n}, null, 2));\n\nreturn merged;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "id": "merge-token-data",
+      "name": "Merge Token Data"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "q",
+                "value": "in:inbox is:unread -in:sent"
+              },
+              {
+                "name": "maxResults",
+                "value": "10"
+              }
+            ]
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2000,
+        200
+      ],
+      "id": "check-gmail-inbox",
+      "name": "Check Gmail Inbox via API"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Check if there are new emails and pass through data if messages exist\n// This replaces the IF node to ensure proper evaluation\nconst gmailResponse = $json;\n\nconsole.log('=== Has New Emails Check ===');\nconsole.log('Gmail response:', JSON.stringify(gmailResponse, null, 2));\nconsole.log('Has messages property:', 'messages' in gmailResponse);\nconsole.log('Messages value:', gmailResponse.messages);\nconsole.log('Is array:', Array.isArray(gmailResponse.messages));\nconsole.log('Messages length:', gmailResponse.messages ? gmailResponse.messages.length : 0);\n\n// Check if messages exist and is a non-empty array\nconst hasMessages = gmailResponse.messages && \n                    Array.isArray(gmailResponse.messages) && \n                    gmailResponse.messages.length > 0;\n\nconsole.log('Has messages (boolean):', hasMessages);\n\nif (!hasMessages) {\n  console.log('No messages found - returning null to stop workflow');\n  return null; // Return null to stop processing this branch\n}\n\nconsole.log(`Found ${gmailResponse.messages.length} messages - passing through data`);\n// Return the data to continue processing\nreturn gmailResponse;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "id": "has-new-emails",
+      "name": "Has New Emails?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Process each message ID and prepare for fetching full message details\n// This node processes all items at once to access data from previous nodes\n// Receives data from 'Has New Emails?' node (which passes through data from 'Check Gmail Inbox via API')\n\nconsole.log('=== Prepare Message IDs - Debug START ===');\n\n// Get all input items from Has New Emails? node (true branch)\n// This data comes from Check Gmail Inbox via API\nconst allItems = $input.all();\nconsole.log(`Received ${allItems.length} items from Has New Emails? (true branch)`);\n\nif (allItems.length === 0) {\n  console.warn('WARNING: No items received from Check Gmail Inbox via API');\n  return [];\n}\n\n// Log first item structure for debugging\nif (allItems.length > 0) {\n  console.log('First item structure:', JSON.stringify(allItems[0].json, null, 2));\n}\n\n// Get all items from Merge Token Data node\nlet allMergedData = [];\ntry {\n  allMergedData = $('Merge Token Data').all();\n  console.log(`Found ${allMergedData.length} items from Merge Token Data`);\n} catch (e) {\n  console.error('ERROR accessing Merge Token Data:', e.message);\n  throw new Error('Cannot access Merge Token Data node: ' + e.message);\n}\n\nif (allMergedData.length === 0) {\n  console.error('ERROR: No data from Merge Token Data node');\n  throw new Error('Merge Token Data node returned no items');\n}\n\nif (allMergedData.length !== allItems.length) {\n  console.warn(`Item count mismatch: ${allItems.length} Gmail responses vs ${allMergedData.length} companies`);\n  console.warn('Will match by index (item 0 with item 0, etc.)');\n}\n\nconst allProcessedMessages = [];\n\n// Process each item from Gmail API\nfor (let i = 0; i < allItems.length; i++) {\n  const messagesResponse = allItems[i].json;\n  const mergedData = allMergedData[i]?.json || allMergedData[0]?.json; // Fallback to first if count mismatch\n  \n  console.log(`\\n--- Processing item ${i} ---`);\n  console.log('Gmail response keys:', Object.keys(messagesResponse || {}));\n  console.log('Has messages property:', 'messages' in (messagesResponse || {}));\n  console.log('Messages value:', messagesResponse.messages);\n  console.log('Messages type:', typeof messagesResponse.messages);\n  console.log('Is array:', Array.isArray(messagesResponse.messages));\n  console.log('Messages count:', messagesResponse.messages?.length || 0);\n  console.log('Company name:', mergedData?.company_name);\n  \n  if (!mergedData) {\n    console.error(`ERROR: No company data found for item ${i}`);\n    continue;\n  }\n  \n  // Extract messages array from response\n  const messageIds = messagesResponse.messages || [];\n  \n  if (!Array.isArray(messageIds)) {\n    console.error(`ERROR: messages is not an array in item ${i}:`, typeof messageIds);\n    console.error('Full response:', JSON.stringify(messagesResponse, null, 2));\n    continue;\n  }\n  \n  if (messageIds.length === 0) {\n    console.log(`No messages found in item ${i} for ${mergedData.company_name} - skipping`);\n    continue;\n  }\n  \n  console.log(`Found ${messageIds.length} messages for ${mergedData.company_name}`);\n  \n  // Prepare data for each message ID\n  for (const msg of messageIds) {\n    const messageId = msg.id;\n    \n    if (!messageId) {\n      console.warn('Message missing ID:', msg);\n      continue;\n    }\n    \n    allProcessedMessages.push({\n      company_id: mergedData.company_id,\n      company_email: mergedData.company_email,\n      company_name: mergedData.company_name,\n      n8n_credential_id: mergedData.n8n_credential_id,\n      access_token: mergedData.access_token,\n      message_id: messageId\n    });\n  }\n  \n  console.log(`✓ Processed ${messageIds.length} messages for ${mergedData.company_name}`);\n}\n\nconsole.log(`\\n=== Prepare Message IDs - Debug END ===`);\nconsole.log(`Total: Found ${allProcessedMessages.length} messages to process across all companies`);\n\nif (allProcessedMessages.length === 0) {\n  console.log('No messages to process - returning empty array (this is OK if no unread emails)');\n  return [];\n}\n\n// Return array - n8n will automatically create one item per array element\nreturn allProcessedMessages;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        200
+      ],
+      "id": "prepare-message-ids",
+      "name": "Prepare Message IDs"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + $json.message_id }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "format",
+                "value": "full"
+              }
+            ]
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2660,
+        200
+      ],
+      "id": "get-message-details",
+      "name": "Get Full Message Details"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract email data from Gmail message\n// This node runs once for each message from Get Full Message Details\nconst message = $json;\n\n// Get company data from Prepare Message IDs node by matching message_id\n// The input to Get Full Message Details was from Prepare Message IDs\nlet companyData = null;\ntry {\n  const prepareMessageIdsNode = $('Prepare Message IDs');\n  if (prepareMessageIdsNode && prepareMessageIdsNode.all) {\n    // Get all items from Prepare Message IDs\n    const allItems = prepareMessageIdsNode.all();\n    const currentMessageId = message.id;\n    \n    // Find the item with matching message_id\n    const matchingItem = allItems.find(item => item.json.message_id === currentMessageId);\n    if (matchingItem) {\n      companyData = matchingItem.json;\n    } else {\n      console.warn(`Could not find company data for message_id: ${currentMessageId}`);\n      console.warn('Available message_ids:', allItems.map(item => item.json.message_id).slice(0, 5));\n    }\n  }\n} catch (e) {\n  console.error('Error accessing Prepare Message IDs:', e.message);\n}\n\nif (!companyData) {\n  console.error('ERROR: Could not get company data');\n  console.error('Message ID:', message.id);\n  throw new Error('Company data not found - cannot extract email data');\n}\n\nconsole.log('Extract Email Data - Message ID:', message.id);\nconsole.log('Extract Email Data - Company:', companyData.company_name);\n\n// Extract headers\nconst headers = message.payload.headers || [];\nconst getHeader = (name) => {\n  const header = headers.find(h => h.name.toLowerCase() === name.toLowerCase());\n  return header ? header.value : '';\n};\n\n// Get from and to addresses\nconst fromAddress = getHeader('From') || '';\nconst toAddress = getHeader('To') || companyData.company_email;\n\n// FILTER: Skip sent emails - if \"from\" contains company email, it's a sent email\n// Extract email from \"From\" field (handles formats like \"Name <email@domain.com>\" or just \"email@domain.com\")\nconst extractEmailFromField = (field) => {\n  if (!field) return '';\n  // Match email pattern in the field\n  const emailMatch = field.match(/[\\w\\.-]+@[\\w\\.-]+\\.\\w+/);\n  return emailMatch ? emailMatch[0].toLowerCase() : field.toLowerCase();\n};\n\nconst fromEmail = extractEmailFromField(fromAddress);\nconst companyEmailLower = companyData.company_email.toLowerCase();\n\nif (fromEmail === companyEmailLower) {\n  console.log(`Skipping sent email - From: ${fromAddress}, Company: ${companyData.company_email}`);\n  console.log(`Message ID: ${message.id} - This is a sent email, not an inbox email`);\n  return null; // Return null to skip this email (n8n will filter it out)\n}\n\nconsole.log(`Processing inbox email - From: ${fromAddress}, To: ${toAddress}`);\n\n// Extract body\nlet body = '';\nif (message.payload.body && message.payload.body.data) {\n  body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');\n} else if (message.payload.parts) {\n  for (const part of message.payload.parts) {\n    if (part.mimeType === 'text/plain' && part.body && part.body.data) {\n      body = Buffer.from(part.body.data, 'base64').toString('utf-8');\n      break;\n    } else if (part.mimeType === 'text/html' && part.body && part.body.data) {\n      // Fallback to HTML if plain text not available\n      body = Buffer.from(part.body.data, 'base64').toString('utf-8');\n    }\n  }\n}\n\nreturn {\n  credential_id: companyData.n8n_credential_id,\n  company_id: companyData.company_id,\n  email_data: {\n    subject: getHeader('Subject') || '(No Subject)',\n    body: body || '',\n    from: fromAddress,\n    to: toAddress,\n    thread_id: message.threadId || null,\n    gmail_message_id: message.id || null\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        200
+      ],
+      "id": "extract-email-data",
+      "name": "Extract Email Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/emails/process",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  credential_id: $json.credential_id,\n  email_data: $json.email_data\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3320,
+        200
+      ],
+      "id": "call-backend",
+      "name": "Call Backend API"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + $('Extract Email Data').item.json.email_data.gmail_message_id + '/modify' }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Merge Token Data').item.json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  removeLabelIds: ['UNREAD']\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000,
+          "continueOnFail": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3540,
+        200
+      ],
+      "id": "mark-email-read",
+      "name": "Mark Email as Read"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Companies with OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Companies with OAuth": {
+      "main": [
+        [
+          {
+            "node": "Filter Companies with OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Companies with OAuth": {
+      "main": [
+        [
+          {
+            "node": "Prepare Token Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Token Request": {
+      "main": [
+        [
+          {
+            "node": "Get Gmail Token from Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Gmail Token from Database": {
+      "main": [
+        [
+          {
+            "node": "Merge Token Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Token Data": {
+      "main": [
+        [
+          {
+            "node": "Check Gmail Inbox via API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Gmail Inbox via API": {
+      "main": [
+        [
+          {
+            "node": "Has New Emails?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has New Emails?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message IDs": {
+      "main": [
+        [
+          {
+            "node": "Get Full Message Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Full Message Details": {
+      "main": [
+        [
+          {
+            "node": "Extract Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Email Data": {
+      "main": [
+        [
+          {
+            "node": "Call Backend API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Backend API": {
+      "main": [
+        [
+          {
+            "node": "Mark Email as Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Email as Read": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "America/New_York"
+  },
+  "versionId": "email-ingestion-v2",
+  "meta": {
+    "instanceId": "email-ingestion-instance"
+  },
+  "id": "email-ingestion-workflow"
+}
