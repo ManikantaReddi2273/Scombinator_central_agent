@@ -34,9 +34,9 @@ export default function Companies() {
     }
     
     // Build Google OAuth URL with company_id in state
+    // gmail.modify includes read, send, and modify (mark as read) permissions
     const scopes = [
-      'https://www.googleapis.com/auth/gmail.readonly',
-      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/drive.readonly',
       'https://www.googleapis.com/auth/drive.file'
     ].join(' ')

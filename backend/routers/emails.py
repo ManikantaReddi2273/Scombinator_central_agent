@@ -10,18 +10,17 @@ from schemas.email import EmailProcessRequest, EmailResponse
 from services.tenant import tenant_service
 from services.policy_loader import policy_loader_service
 from services.audit_logger import audit_logger_service
-from services.classification_agent import classification_agent
-from services.priority_scorer_agent import priority_scorer_agent
-from services.summarizer_agent import summary_agent
-from services.action_recommender_agent import action_recommender_agent
-from services.draft_generator_agent import draft_generator_agent
+from services.flow1 import Flow1Orchestrator
 from models.email import Email
 from models.draft import Draft
 from models.company import Company
 import uuid
+import logging
 from datetime import datetime
 from typing import Optional
 from auth.jwt import get_current_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/emails", tags=["Emails"])
 
@@ -88,112 +87,64 @@ async def process_email(
     to_email = email_data.get("to", "")
     thread_id = email_data.get("thread_id")
     
-    # Run Classification Agent (Phase 2) - Run agents FIRST to get all data
-    classification = classification_agent.classify(subject, body)
+    # Process email through Flow 1 LangGraph workflow
+    orchestrator = Flow1Orchestrator()
     
-    # Run Priority Scoring Agent (Phase 3)
-    priority_score = priority_scorer_agent.score_from_classification(classification)
-    classification["priority_score"] = str(priority_score)
-    
-    # Run Summary Agent (Phase 4)
-    executive_summary = summary_agent.generate_summary(
-        subject=subject,
-        body=body,
-        function=classification["function"],
-        intent=classification["intent"]
-    )
-    
-    # Run Action Recommendation Agent (Phase 5)
-    recommended_action = action_recommender_agent.recommend_from_classification(classification)
-    
-    # Create email record with ALL data at once (optimized - single commit)
-    email_record = Email(
-        id=uuid.uuid4(),
-        company_id=uuid.UUID(company_id),
-        subject=subject,
-        body=body,
-        from_email=from_email,
-        to_email=to_email,
-        thread_id=thread_id,
-        gmail_message_id=gmail_message_id,
-        # Classification fields set directly
-        function=classification["function"],
-        intent=classification["intent"],
-        urgency=classification["urgency"],
-        impact=classification["impact"],
-        confidence=classification["confidence"],
-        priority_score=str(priority_score),
-        executive_summary=executive_summary,
-        recommended_action=recommended_action,
-        classification_metadata=classification
-    )
-    
-    db.add(email_record)
-    await db.commit()
-    await db.refresh(email_record)
-    
-    # Generate draft if action is "Reply with template" (Phase 5)
-    draft_id = None
-    if recommended_action == "Reply with template":
-        try:
-            draft_data = await draft_generator_agent.generate_draft(
-                db=db,
-                company_id=company_id,
-                email_subject=subject,
-                email_body=body,
-                from_email=from_email,
-                function=classification["function"],
-                intent=classification["intent"]
-            )
-            
-            # Create draft record
-            draft = Draft(
-                id=uuid.uuid4(),
-                company_id=uuid.UUID(company_id),
-                email_id=email_record.id,
-                subject=draft_data["subject"],
-                body=draft_data["body"],
-                status="pending",
-                version="1.0",
-                template_used=draft_data["template_used"],
-                variables_used=str(draft_data["variables_used"])
-            )
-            
-            db.add(draft)
-            await db.commit()
-            await db.refresh(draft)
-            draft_id = str(draft.id)
-        except Exception as e:
-            # Log error but don't fail email processing
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error generating draft for email {email_record.id}: {str(e)}")
-    
-    # Log email processing (non-blocking - don't fail if logging fails)
     try:
-        await audit_logger_service.log_email_processed(
+        result = await orchestrator.process_email(
             db=db,
             company_id=company_id,
-            email_id=str(email_record.id),
-            classification_metadata=classification
+            email_data={
+                "subject": subject,
+                "body": body,
+                "from": from_email,
+                "to": to_email,
+                "thread_id": thread_id,
+                "gmail_message_id": gmail_message_id
+            }
         )
+        
+        # Log email processing (non-blocking - don't fail if logging fails)
+        try:
+            await audit_logger_service.log_email_processed(
+                db=db,
+                company_id=company_id,
+                email_id=result["email_id"],
+                classification_metadata=result.get("classification", {})
+            )
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error logging email processing: {str(e)}")
+        
+        # Handle duplicate_skipped status gracefully
+        if result.get("status") == "duplicate_skipped":
+            return {
+                "email_id": result.get("email_id"),
+                "draft_id": result.get("draft_id"),
+                "status": "duplicate",
+                "message": result.get("message", "Email was already processed")
+            }
+        
+        return {
+            "email_id": result["email_id"],
+            "draft_id": result.get("draft_id"),
+            "company_id": company_id,
+            "status": result.get("status", "processed"),
+            "classification": result.get("classification", {}),
+            "executive_summary": result.get("executive_summary"),
+            "recommended_action": result.get("recommended_action"),
+            "message": "Email processed successfully"
+        }
+        
     except Exception as e:
-        # Log error but don't fail email processing
         import logging
         logger = logging.getLogger(__name__)
-        logger.warning(f"Error logging email processing for {email_record.id}: {str(e)}")
-    
-    return {
-        "email_id": str(email_record.id),
-        "draft_id": draft_id,
-        "company_id": company_id,
-        "status": "processed",
-        "classification": classification,
-        "priority_score": str(priority_score),
-        "executive_summary": executive_summary,
-        "recommended_action": recommended_action,
-        "message": "Email processed successfully"
-    }
+        logger.error(f"Error processing email through Flow 1: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing email: {str(e)}"
+        )
 
 
 @router.get("/priority-queue", response_model=list[dict])
@@ -298,7 +249,7 @@ async def get_email(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get email by ID with full details
+    Get email by ID with full details including thread history
     No auth required - n8n calls this directly, but admin can also use it
     """
     result = await db.execute(
@@ -312,6 +263,23 @@ async def get_email(
             detail="Email not found"
         )
     
+    # Load thread history if thread_id exists
+    thread_history = []
+    thread_count = 0
+    if email.thread_id:
+        try:
+            orchestrator = Flow1Orchestrator()
+            thread_history = await orchestrator._load_thread_history(
+                db=db,
+                company_id=str(email.company_id),
+                thread_id=email.thread_id,
+                current_gmail_message_id=email.gmail_message_id
+            )
+            thread_count = len(thread_history)
+        except Exception as e:
+            logger.warning(f"Error loading thread history for email {email_id}: {str(e)}")
+            # Continue with empty history
+    
     return EmailResponse(
         id=email.id,
         company_id=email.company_id,
@@ -319,6 +287,8 @@ async def get_email(
         from_email=email.from_email,
         to_email=email.to_email,
         thread_id=email.thread_id,
+        thread_history=thread_history,
+        thread_count=thread_count,
         function=email.function,
         intent=email.intent,
         priority_score=email.priority_score,

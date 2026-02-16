@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Badge } from './ui/badge'
 import { formatDate, getPriorityColor } from '../lib/utils'
-import { Mail, Clock, User, Building2, AlertCircle } from 'lucide-react'
+import { Mail, Clock, User, Building2, AlertCircle, MessageSquare } from 'lucide-react'
 
 interface EmailDetailProps {
   email: {
@@ -19,6 +19,14 @@ interface EmailDetailProps {
     confidence: string | null
     recommended_action: string | null
     thread_id: string | null
+    thread_history?: Array<{
+      subject: string
+      body: string
+      from_email: string
+      created_at: string | null
+      was_reply: boolean
+    }>
+    thread_count?: number
     created_at: string
   }
   companyName?: string
@@ -92,16 +100,64 @@ export default function EmailDetail({ email, companyName }: EmailDetailProps) {
           {/* Body */}
           <div>
             <h4 className="text-sm font-semibold text-gray-900 mb-1">Body</h4>
-            <div className="text-sm text-gray-700 bg-gray-50 p-4 rounded-md whitespace-pre-wrap max-h-64 overflow-y-auto">
+            <div className="text-sm text-gray-700 bg-gray-50 p-4 rounded-md whitespace-pre-wrap max-h-64 overflow-y-auto break-words">
               {email.body}
             </div>
           </div>
 
           {/* Thread Context */}
           {email.thread_id && (
+            <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-gray-600">
-              <AlertCircle className="w-4 h-4" />
-              <span>Part of conversation thread: {email.thread_id.substring(0, 20)}...</span>
+                <MessageSquare className="w-4 h-4" />
+                <span className="font-medium">Thread Information:</span>
+                <Badge variant="outline" className="border-blue-300 text-blue-700">
+                  {email.thread_count || 0} previous {email.thread_count === 1 ? 'email' : 'emails'}
+                </Badge>
+                <span className="text-xs text-gray-500">
+                  Thread ID: {email.thread_id.substring(0, 20)}...
+                </span>
+              </div>
+              
+              {/* Thread History */}
+              {email.thread_history && email.thread_history.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Conversation History</h4>
+                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                    {email.thread_history.map((prevEmail, index) => (
+                      <div
+                        key={index}
+                        className="bg-gray-50 p-3 rounded-md border border-gray-200"
+                      >
+                        <div className="flex items-start justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Mail className="w-3 h-3 text-gray-500" />
+                            <span className="text-xs font-medium text-gray-700">
+                              {prevEmail.from_email}
+                            </span>
+                            {prevEmail.was_reply && (
+                              <Badge variant="outline" className="text-xs border-gray-300 text-gray-600">
+                                Reply
+                              </Badge>
+                            )}
+                          </div>
+                          {prevEmail.created_at && (
+                            <span className="text-xs text-gray-500">
+                              {formatDate(prevEmail.created_at)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs font-semibold text-gray-900 mb-1">
+                          {prevEmail.subject}
+                        </p>
+                        <p className="text-xs text-gray-600 line-clamp-2">
+                          {prevEmail.body}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

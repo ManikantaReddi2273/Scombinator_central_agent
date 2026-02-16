@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>S Combinator  Central Agent Platform Blueprint</title>
+  <title>S Combinator — Central Agent Platform Blueprint</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     
@@ -50,7 +50,7 @@
     }
     .pipeline-stage {
       flex: 1;
-      min-width: 120px;
+      min-width: 100px;
       text-align: center;
       padding: 12px 8px;
     }
@@ -101,6 +101,103 @@
       color: #6b7280;
     }
     
+    /* Brand Context Foundation Section */
+    .brand-foundation {
+      background: linear-gradient(135deg, #ec489920, #f472b620);
+      border: 2px solid #ec4899;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .brand-foundation::before {
+      content: '';
+      position: absolute;
+      bottom: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 12px solid transparent;
+      border-right: 12px solid transparent;
+      border-top: 12px solid #ec4899;
+    }
+    .brand-foundation-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .brand-foundation-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ec4899, #f472b6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    .brand-foundation-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .brand-foundation-subtitle {
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .brand-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+    }
+    .brand-item {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      border: 1px solid #fce7f3;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .brand-item:hover {
+      border-color: #ec4899;
+      box-shadow: 0 2px 8px rgba(236, 72, 153, 0.15);
+    }
+    .brand-item-icon {
+      font-size: 24px;
+      margin-bottom: 6px;
+    }
+    .brand-item-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+    }
+    .brand-item-desc {
+      font-size: 10px;
+      color: #9ca3af;
+      margin-top: 2px;
+    }
+    
+    /* Brand Feed Indicator */
+    .brand-feed-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 0;
+      color: #ec4899;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .brand-feed-line {
+      flex: 1;
+      max-width: 100px;
+      height: 2px;
+      background: linear-gradient(to right, transparent, #ec4899, transparent);
+    }
+    
     /* Two Column Layout */
     .two-col {
       display: grid;
@@ -127,6 +224,20 @@
       font-size: 16px;
       font-weight: 700;
       color: #1f2937;
+    }
+    
+    /* Brand Context Badge on Flow Cards */
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fce7f3;
+      color: #be185d;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 8px;
     }
     
     /* Flow Cards */
@@ -338,6 +449,20 @@
     .step-box-process { background: white; border: 1px solid #e5e7eb; }
     .step-box-output { font-weight: 500; }
     
+    /* Brand Context Highlight in Steps */
+    .brand-context-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: linear-gradient(135deg, #fce7f3, #fbcfe8);
+      color: #be185d;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 4px;
+    }
+    
     .step-box ul {
       list-style: none;
       padding: 0;
@@ -351,8 +476,17 @@
       gap: 8px;
     }
     .step-box li::before {
-      content: """;
+      content: "•";
       flex-shrink: 0;
+    }
+    .step-box li.brand-powered {
+      background: linear-gradient(to right, #fce7f310, transparent);
+      border-left: 2px solid #ec4899;
+      padding-left: 8px;
+      margin-left: -8px;
+    }
+    .step-box li.brand-powered::before {
+      content: "🎨";
     }
     
     /* Summary */
@@ -368,21 +502,26 @@
     }
     .summary-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      .summary-grid { grid-template-columns: repeat(3, 1fr); }
     }
     @media (max-width: 600px) {
-      .summary-grid { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: 1fr 1fr; }
     }
     .summary-item {
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 12px;
+      text-align: center;
+      gap: 8px;
     }
     .summary-num {
-      width: 40px;
-      height: 40px;
-      border-radius: 8px;
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -391,11 +530,14 @@
     }
     .summary-text strong {
       display: block;
-      font-size: 14px;
+      font-size: 13px;
     }
     .summary-text span {
-      font-size: 12px;
+      font-size: 11px;
       color: #9ca3af;
+    }
+    .summary-item.foundation .summary-num {
+      background: linear-gradient(135deg, #ec4899, #f472b6);
     }
     
     /* Footer */
@@ -413,13 +555,64 @@
     .flow-wrapper .flow-card.active {
       border-radius: 12px 12px 0 0;
     }
+    
+    /* Brand Context Detail Panel */
+    .brand-detail {
+      display: none;
+      background: white;
+      border: 2px solid #ec4899;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 16px;
+      animation: slideDown 0.2s ease-out;
+    }
+    .brand-detail.visible { display: block; }
+    
+    .brand-detail-section {
+      margin-bottom: 16px;
+    }
+    .brand-detail-section:last-child {
+      margin-bottom: 0;
+    }
+    .brand-detail-section h4 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #be185d;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-detail-content {
+      background: #fdf2f8;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .brand-detail-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .brand-detail-list li {
+      font-size: 13px;
+      color: #374151;
+      padding: 4px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .brand-detail-list li::before {
+      content: "→";
+      color: #ec4899;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <!-- Header -->
     <div class="header">
-      <h1>S Combinator  Central Agent Platform</h1>
+      <h1>S Combinator — Central Agent Platform</h1>
       <p>Multi-company operational agent for Customer Acquisition + Hiring</p>
     </div>
     
@@ -430,27 +623,32 @@
       </div>
       <div class="pipeline">
         <div class="pipeline-stage">
-          <div class="pipeline-icon" style="background:#6b728020;">=�</div>
+          <div class="pipeline-icon" style="background:linear-gradient(135deg, #ec489920, #f472b620);">🎨</div>
+          <div class="pipeline-label">Brand Context</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage">
+          <div class="pipeline-icon" style="background:#6b728020;">📥</div>
           <div class="pipeline-label">Raw Inputs</div>
         </div>
-        <div class="pipeline-arrow">�</div>
+        <div class="pipeline-arrow">→</div>
         <div class="pipeline-stage">
-          <div class="pipeline-icon" style="background:#3b82f620;">>�</div>
+          <div class="pipeline-icon" style="background:#3b82f620;">🧠</div>
           <div class="pipeline-label">Structured Understanding</div>
         </div>
-        <div class="pipeline-arrow">�</div>
+        <div class="pipeline-arrow">→</div>
         <div class="pipeline-stage">
-          <div class="pipeline-icon" style="background:#8b5cf620;">�</div>
+          <div class="pipeline-icon" style="background:#8b5cf620;">⚖️</div>
           <div class="pipeline-label">Prioritized Decisions</div>
         </div>
-        <div class="pipeline-arrow">�</div>
+        <div class="pipeline-arrow">→</div>
         <div class="pipeline-stage">
-          <div class="pipeline-icon" style="background:#10b98120;"></div>
+          <div class="pipeline-icon" style="background:#10b98120;">✏️</div>
           <div class="pipeline-label">Editable Drafts</div>
         </div>
-        <div class="pipeline-arrow">�</div>
+        <div class="pipeline-arrow">→</div>
         <div class="pipeline-stage">
-          <div class="pipeline-icon" style="background:#f59e0b20;"></div>
+          <div class="pipeline-icon" style="background:#f59e0b20;">✅</div>
           <div class="pipeline-label">Logged Outcomes</div>
         </div>
       </div>
@@ -460,41 +658,104 @@
     <div class="card">
       <div class="principles">
         <div class="principle">
-          <span class="principle-icon"><�</span>
+          <span class="principle-icon">🎨</span>
+          <div class="principle-text">
+            <strong>Brand-Informed</strong>
+            <span>Tone, voice, SOPs feed all flows</span>
+          </div>
+        </div>
+        <div class="principle">
+          <span class="principle-icon">🏢</span>
           <div class="principle-text">
             <strong>Company-Aware</strong>
             <span>Multi-tenant, per-company context</span>
           </div>
         </div>
         <div class="principle">
-          <span class="principle-icon">�</span>
+          <span class="principle-icon">⚡</span>
           <div class="principle-text">
             <strong>Priority-Driven</strong>
             <span>Unified cross-company queue</span>
           </div>
         </div>
         <div class="principle">
-          <span class="principle-icon">=�</span>
+          <span class="principle-icon">📋</span>
           <div class="principle-text">
             <strong>Summary-First</strong>
             <span>Zero-context executive summaries</span>
           </div>
         </div>
         <div class="principle">
-          <span class="principle-icon">=d</span>
+          <span class="principle-icon">👤</span>
           <div class="principle-text">
             <strong>Human-Controlled</strong>
             <span>Editable drafts, final approval</span>
           </div>
         </div>
         <div class="principle">
-          <span class="principle-icon">=�</span>
+          <span class="principle-icon">📝</span>
           <div class="principle-text">
             <strong>Fully Logged</strong>
             <span>Complete audit trail</span>
           </div>
         </div>
       </div>
+    </div>
+    
+    <!-- Brand Context Agent - Foundation Layer -->
+    <div class="brand-foundation">
+      <div class="brand-foundation-header">
+        <div class="brand-foundation-icon">🎨</div>
+        <div>
+          <div class="brand-foundation-title">Brand Context Agent</div>
+          <div class="brand-foundation-subtitle">Foundation layer that feeds brand awareness to all operational flows</div>
+        </div>
+      </div>
+      <div class="brand-grid">
+        <div class="brand-item" data-brand="tone">
+          <div class="brand-item-icon">🗣️</div>
+          <div class="brand-item-label">Brand Tone</div>
+          <div class="brand-item-desc">Voice characteristics</div>
+        </div>
+        <div class="brand-item" data-brand="voice">
+          <div class="brand-item-icon">✍️</div>
+          <div class="brand-item-label">Writing Style</div>
+          <div class="brand-item-desc">Language patterns</div>
+        </div>
+        <div class="brand-item" data-brand="sops">
+          <div class="brand-item-icon">📋</div>
+          <div class="brand-item-label">SOPs</div>
+          <div class="brand-item-desc">Standard procedures</div>
+        </div>
+        <div class="brand-item" data-brand="policies">
+          <div class="brand-item-icon">📜</div>
+          <div class="brand-item-label">Policies</div>
+          <div class="brand-item-desc">Rules & guidelines</div>
+        </div>
+        <div class="brand-item" data-brand="templates">
+          <div class="brand-item-icon">📄</div>
+          <div class="brand-item-label">Templates</div>
+          <div class="brand-item-desc">Pre-approved content</div>
+        </div>
+        <div class="brand-item" data-brand="faqs">
+          <div class="brand-item-icon">❓</div>
+          <div class="brand-item-label">FAQs & Answers</div>
+          <div class="brand-item-desc">Common responses</div>
+        </div>
+      </div>
+      
+      <!-- Brand Detail Panel (expandable) -->
+      <div class="brand-detail" id="brand-detail">
+        <button class="close-btn" onclick="closeBrandDetail()" style="float:right;">×</button>
+        <div id="brand-detail-content"></div>
+      </div>
+    </div>
+    
+    <!-- Feed Indicator -->
+    <div class="brand-feed-indicator">
+      <div class="brand-feed-line"></div>
+      <span>↓ FEEDS INTO ALL FLOWS ↓</span>
+      <div class="brand-feed-line"></div>
     </div>
     
     <!-- Two Column Layout -->
@@ -512,8 +773,9 @@
             <div class="flow-header">
               <div class="flow-dot" style="background:#3b82f6;"></div>
               <span class="flow-category">Customer Acquisition</span>
+              <span class="brand-badge">🎨 Brand-Powered</span>
             </div>
-            <div class="flow-title">Flow 1: Inbound Email � Response</div>
+            <div class="flow-title">Flow 1: Inbound Email → Response</div>
             <div class="flow-desc">Someone emails a company inbox and expects a reply</div>
             <div class="flow-progress">
               <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.3;"></div>
@@ -524,7 +786,7 @@
               <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.8;"></div>
               <div class="flow-progress-bar" style="background:#3b82f6; opacity:0.9;"></div>
             </div>
-            <div class="flow-steps-count">7 steps</div>
+            <div class="flow-steps-count">7 steps • Uses: Tone, Templates, FAQs, Policies</div>
           </div>
           <div class="flow-detail" id="detail-inbound"></div>
         </div>
@@ -535,8 +797,9 @@
             <div class="flow-header">
               <div class="flow-dot" style="background:#8b5cf6;"></div>
               <span class="flow-category">Customer Acquisition</span>
+              <span class="brand-badge">🎨 Brand-Powered</span>
             </div>
-            <div class="flow-title">Flow 2: Outbound Email � Send</div>
+            <div class="flow-title">Flow 2: Outbound Email → Send</div>
             <div class="flow-desc">Send emails proactively (leads, marketing, agreements, intros)</div>
             <div class="flow-progress">
               <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.3;"></div>
@@ -546,7 +809,7 @@
               <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.85;"></div>
               <div class="flow-progress-bar" style="background:#8b5cf6; opacity:0.95;"></div>
             </div>
-            <div class="flow-steps-count">6 steps</div>
+            <div class="flow-steps-count">6 steps • Uses: Tone, Templates, SOPs</div>
           </div>
           <div class="flow-detail" id="detail-outbound"></div>
         </div>
@@ -571,9 +834,10 @@
             <div class="flow-header">
               <div class="flow-dot" style="background:#10b981;"></div>
               <span class="flow-category">Hiring & Talent</span>
+              <span class="brand-badge">🎨 Brand-Powered</span>
             </div>
             <div class="flow-title">Flow 3: Pre-Hiring</div>
-            <div class="flow-desc">Applications � Screening � Shortlisting</div>
+            <div class="flow-desc">Applications → Screening → Shortlisting</div>
             <div class="flow-progress">
               <div class="flow-progress-bar" style="background:#10b981; opacity:0.3;"></div>
               <div class="flow-progress-bar" style="background:#10b981; opacity:0.45;"></div>
@@ -581,7 +845,7 @@
               <div class="flow-progress-bar" style="background:#10b981; opacity:0.8;"></div>
               <div class="flow-progress-bar" style="background:#10b981; opacity:0.95;"></div>
             </div>
-            <div class="flow-steps-count">5 steps</div>
+            <div class="flow-steps-count">5 steps • Uses: SOPs, Policies</div>
           </div>
           <div class="flow-detail" id="detail-prehiring"></div>
         </div>
@@ -592,9 +856,10 @@
             <div class="flow-header">
               <div class="flow-dot" style="background:#f59e0b;"></div>
               <span class="flow-category">Hiring & Talent</span>
+              <span class="brand-badge">🎨 Brand-Powered</span>
             </div>
             <div class="flow-title">Flow 4: Post-Hiring</div>
-            <div class="flow-desc">Interview � Decision � Communication</div>
+            <div class="flow-desc">Interview → Decision → Communication</div>
             <div class="flow-progress">
               <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.3;"></div>
               <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.45;"></div>
@@ -602,14 +867,14 @@
               <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.8;"></div>
               <div class="flow-progress-bar" style="background:#f59e0b; opacity:0.95;"></div>
             </div>
-            <div class="flow-steps-count">5 steps</div>
+            <div class="flow-steps-count">5 steps • Uses: Tone, Templates, Policies</div>
           </div>
           <div class="flow-detail" id="detail-posthiring"></div>
         </div>
         
         <div class="connection">
           <div class="connection-line"></div>
-          <span>Shortlisted � Interview pipeline</span>
+          <span>Shortlisted → Interview pipeline</span>
           <div class="connection-line"></div>
         </div>
       </div>
@@ -617,58 +882,148 @@
     
     <!-- Summary -->
     <div class="summary">
-      <h3>Four Core Operational Pipelines</h3>
+      <h3>Five Core Components</h3>
       <div class="summary-grid">
+        <div class="summary-item foundation">
+          <div class="summary-num">🎨</div>
+          <div class="summary-text">
+            <strong>Brand Context</strong>
+            <span>Foundation Layer</span>
+          </div>
+        </div>
         <div class="summary-item">
           <div class="summary-num" style="background:#3b82f6;">1</div>
           <div class="summary-text">
             <strong>Inbound Email</strong>
-            <span>Understand � Decide � Respond</span>
+            <span>Understand → Respond</span>
           </div>
         </div>
         <div class="summary-item">
           <div class="summary-num" style="background:#8b5cf6;">2</div>
           <div class="summary-text">
             <strong>Outbound Email</strong>
-            <span>Draft � Send � Track</span>
+            <span>Draft → Send → Track</span>
           </div>
         </div>
         <div class="summary-item">
           <div class="summary-num" style="background:#10b981;">3</div>
           <div class="summary-text">
             <strong>Pre-Hiring</strong>
-            <span>Resume � Signal � Verdict</span>
+            <span>Resume → Verdict</span>
           </div>
         </div>
         <div class="summary-item">
           <div class="summary-num" style="background:#f59e0b;">4</div>
           <div class="summary-text">
             <strong>Post-Hiring</strong>
-            <span>Interview � Decision � Communicate</span>
+            <span>Interview → Communicate</span>
           </div>
         </div>
       </div>
     </div>
     
     <div class="footer">
-      Click any flow card to expand details " Click steps to see Input � Process � Output
+      Click any flow card to expand details • Click steps to see Input → Process → Output • 🎨 indicates brand context integration
     </div>
   </div>
 
   <script>
+    // Brand Context Data
+    const brandData = {
+      tone: {
+        title: '🗣️ Brand Tone',
+        description: 'Voice characteristics that define how the company communicates',
+        items: [
+          'Formality level (casual, professional, formal)',
+          'Personality traits (friendly, authoritative, innovative)',
+          'Emotional register (warm, neutral, enthusiastic)',
+          'Company-specific vocabulary and phrases',
+          'Prohibited language and phrases to avoid'
+        ],
+        usedIn: ['Inbound emails', 'Outbound emails', 'Candidate communication']
+      },
+      voice: {
+        title: '✍️ Writing Style',
+        description: 'Language patterns and formatting preferences',
+        items: [
+          'Sentence structure preferences (short/long, complex/simple)',
+          'Active vs passive voice guidelines',
+          'Technical jargon usage rules',
+          'Greeting and sign-off conventions',
+          'Punctuation and capitalization standards'
+        ],
+        usedIn: ['All email drafting', 'Document generation', 'Interview communications']
+      },
+      sops: {
+        title: '📋 Standard Operating Procedures',
+        description: 'Step-by-step processes for common scenarios',
+        items: [
+          'Lead qualification workflow',
+          'Response time SLAs by priority',
+          'Escalation procedures and triggers',
+          'Follow-up cadence rules',
+          'Handoff protocols between teams',
+          'Hiring process stage gates'
+        ],
+        usedIn: ['Priority scoring', 'Action recommendations', 'Pipeline management']
+      },
+      policies: {
+        title: '📜 Policies & Guidelines',
+        description: 'Rules and constraints that govern actions',
+        items: [
+          'Approval requirements by deal size',
+          'Discount authorization limits',
+          'Data privacy compliance rules',
+          'Interview panel composition rules',
+          'Offer approval hierarchy',
+          'Communication blackout periods'
+        ],
+        usedIn: ['Decision recommendations', 'Draft generation', 'Compliance checks']
+      },
+      templates: {
+        title: '📄 Pre-Approved Templates',
+        description: 'Ready-to-use content blocks and formats',
+        items: [
+          'Email response templates by scenario',
+          'Outreach sequence templates',
+          'Proposal and pricing templates',
+          'Interview invitation templates',
+          'Offer letter templates',
+          'Rejection email templates (soft, standard, hard)'
+        ],
+        usedIn: ['Draft generation', 'Quick responses', 'Candidate communications']
+      },
+      faqs: {
+        title: '❓ FAQs & Approved Answers',
+        description: 'Common questions with vetted responses',
+        items: [
+          'Product/service FAQ bank',
+          'Pricing and discount FAQ',
+          'Implementation and onboarding FAQ',
+          'Company and culture FAQ',
+          'Benefits and compensation FAQ',
+          'Role-specific FAQ collections'
+        ],
+        usedIn: ['Auto-response suggestions', 'Draft enrichment', 'Candidate Q&A']
+      }
+    };
+
+    // Flow Data with Brand Context Integration
     const flowData = {
       inbound: {
-        title: 'Flow 1: Inbound Email � Response',
+        title: 'Flow 1: Inbound Email → Response',
         category: 'Customer Acquisition',
         color: '#3b82f6',
         light: '#dbeafe',
+        brandContext: ['tone', 'templates', 'faqs', 'policies'],
         steps: [
           {
             num: 1,
             title: 'Email Ingestion & Company ID',
             input: 'Raw email',
-            process: ['Map inbox � company (tenant)', 'Identify thread context (new/existing)'],
-            output: 'Email tagged with company_id + thread context'
+            process: ['Map inbox → company (tenant)', 'Identify thread context (new/existing)'],
+            output: 'Email tagged with company_id + thread context',
+            brandPowered: []
           },
           {
             num: 2,
@@ -681,92 +1036,105 @@
               'Impact: Revenue/Hiring/Brand/Low',
               'Confidence: Clear/Ambiguous/Missing info'
             ],
-            output: 'Structured classification metadata'
+            output: 'Structured classification metadata',
+            brandPowered: []
           },
           {
             num: 3,
             title: 'Priority Scoring',
             input: 'Classification metadata',
-            process: ['Convert signals � numeric score (0-100)', 'Apply company context (stage, SLAs)'],
-            output: 'Priority score + queue placement'
+            process: ['Convert signals → numeric score (0-100)', 'Apply company context (stage, SLAs) ← SOPs'],
+            output: 'Priority score + queue placement',
+            brandPowered: [1]
           },
           {
             num: 4,
             title: 'Zero-Context Executive Summary',
             input: 'Email + metadata',
             process: ['Generate 1-2 line summary', 'Explain meaning, not content', 'No quoting, no fluff'],
-            output: 'Executive-ready summary'
+            output: 'Executive-ready summary',
+            brandPowered: []
           },
           {
             num: 5,
             title: 'Action Recommendation',
             input: 'Summary + context',
-            process: ['Reply with template', 'Ask for missing info', 'Schedule meeting', 'Hold/Ignore', 'Escalate to human'],
-            output: 'Recommended next action'
+            process: ['Reply with template ← Templates', 'Ask for missing info', 'Schedule meeting', 'Hold/Ignore ← Policies', 'Escalate to human ← SOPs'],
+            output: 'Recommended next action',
+            brandPowered: [0, 3, 4]
           },
           {
             num: 6,
             title: 'Drafting Layer',
-            input: 'Selected action',
-            process: ['Load company templates', 'Apply brand tone', 'Include approved FAQs/pricing'],
-            output: 'Editable draft + subject suggestions'
+            input: 'Selected action + Brand Context',
+            process: ['Load company templates ← Templates', 'Apply brand tone ← Brand Tone', 'Include approved FAQs/pricing ← FAQs'],
+            output: 'Editable draft + subject suggestions',
+            brandPowered: [0, 1, 2]
           },
           {
             num: 7,
             title: 'Review, Send & Log',
             input: 'Draft email',
             process: ['Human review & edit', 'Send email', 'Log conversation state'],
-            output: 'Sent response + audit record'
+            output: 'Sent response + audit record',
+            brandPowered: []
           }
         ]
       },
       outbound: {
-        title: 'Flow 2: Outbound Email � Send',
+        title: 'Flow 2: Outbound Email → Send',
         category: 'Customer Acquisition',
         color: '#8b5cf6',
         light: '#ede9fe',
+        brandContext: ['tone', 'templates', 'sops'],
         steps: [
           {
             num: 1,
             title: 'Intent Definition',
             input: 'User/system trigger',
-            process: ['Define why email is being sent', 'Identify target company'],
-            output: 'Outbound intent + company context'
+            process: ['Define why email is being sent ← SOPs', 'Identify target company'],
+            output: 'Outbound intent + company context',
+            brandPowered: [0]
           },
           {
             num: 2,
             title: 'Recipient Context Gathering',
             input: 'Intent',
             process: ['Collect: name, company, role', 'Identify lead stage (new/warm/existing)', 'Enrich from sheets/CRM'],
-            output: 'Enriched recipient profile'
+            output: 'Enriched recipient profile',
+            brandPowered: []
           },
           {
             num: 3,
             title: 'Template Selection',
-            input: 'Recipient profile',
-            process: ['AI selects best company template', 'Match: intent + recipient type + relationship stage'],
-            output: 'Selected template + required variables'
+            input: 'Recipient profile + Brand Context',
+            process: ['AI selects best company template ← Templates', 'Match: intent + recipient type + relationship stage'],
+            output: 'Selected template + required variables',
+            brandPowered: [0]
           },
           {
             num: 4,
             title: 'Draft Generation',
-            input: 'Template + variables',
-            process: ['Auto-fill variables', 'Apply brand tone', 'Adjust CTA (reply/call/review)'],
-            output: 'Draft outbound email'
+            input: 'Template + variables + Brand Context',
+            process: ['Auto-fill variables', 'Apply brand tone ← Brand Tone', 'Adjust CTA (reply/call/review)'],
+            output: 'Draft outbound email',
+            brandPowered: [1]
           },
           {
             num: 5,
             title: 'Review & Scheduling',
             input: 'Draft email',
-            process: ['Human review & edit', 'Send now / Schedule / Add to sequence'],
-            output: 'Scheduled or sent email'
+            process: ['Human review & edit', 'Send now / Schedule / Add to sequence ← SOPs'],
+            output: 'Scheduled or sent email',
+            brandPowered: [1]
           },
           {
             num: 6,
             title: 'Tracking & Feedback Loop',
             input: 'Sent email',
-            process: ['Monitor for replies', 'Route replies � Inbound Flow', 'Update engagement status'],
-            output: 'Closed-loop tracking'
+            process: ['Monitor for replies', 'Route replies → Inbound Flow', 'Update engagement status'],
+            output: 'Closed-loop tracking',
+            brandPowered: []
           }
         ]
       },
@@ -775,41 +1143,47 @@
         category: 'Hiring & Talent',
         color: '#10b981',
         light: '#d1fae5',
+        brandContext: ['sops', 'policies'],
         steps: [
           {
             num: 1,
             title: 'Resume Ingestion',
             input: 'Resume (email/upload)',
             process: ['Map to company', 'Map to role (or AI suggests)'],
-            output: 'Candidate record created'
+            output: 'Candidate record created',
+            brandPowered: []
           },
           {
             num: 2,
             title: 'Signal Extraction',
             input: 'Resume',
-            process: ['Extract: Skills', 'Extract: Evidence of execution', 'Extract: Experience depth', 'Flag: Red flags'],
-            output: 'Structured candidate signals'
+            process: ['Extract: Skills', 'Extract: Evidence of execution', 'Extract: Experience depth', 'Flag: Red flags ← Policies'],
+            output: 'Structured candidate signals',
+            brandPowered: [3]
           },
           {
             num: 3,
             title: 'Role-Aware Evaluation',
-            input: 'Candidate signals',
-            process: ['Compare against role blueprint', 'Check: Must-haves', 'Check: Nice-to-haves', 'Check: Disqualifiers'],
-            output: 'Fit score'
+            input: 'Candidate signals + Role Blueprint',
+            process: ['Compare against role blueprint ← SOPs', 'Check: Must-haves', 'Check: Nice-to-haves', 'Check: Disqualifiers ← Policies'],
+            output: 'Fit score',
+            brandPowered: [0, 3]
           },
           {
             num: 4,
             title: 'Zero-Context Summary',
             input: 'Evaluation',
             process: ['2-3 line overview', 'Highlight strengths', 'Note gaps'],
-            output: 'One-screen candidate snapshot'
+            output: 'One-screen candidate snapshot',
+            brandPowered: []
           },
           {
             num: 5,
             title: 'Verdict & Shortlisting',
-            input: 'Summary + score',
-            process: ['Strong Yes', 'Maybe', 'Reject', 'Better fit elsewhere'],
-            output: 'Updated hiring pipeline'
+            input: 'Summary + score + Policies',
+            process: ['Strong Yes', 'Maybe', 'Reject ← Policies', 'Better fit elsewhere'],
+            output: 'Updated hiring pipeline',
+            brandPowered: [2]
           }
         ]
       },
@@ -818,41 +1192,47 @@
         category: 'Hiring & Talent',
         color: '#f59e0b',
         light: '#fef3c7',
+        brandContext: ['tone', 'templates', 'policies'],
         steps: [
           {
             num: 1,
             title: 'Interview Kit Preparation',
-            input: 'Shortlisted candidate',
-            process: ['Generate candidate-specific questions', 'Create practical task ideas', 'Define evaluation focus areas'],
-            output: 'Interview kit for interviewers'
+            input: 'Shortlisted candidate + SOPs',
+            process: ['Generate candidate-specific questions ← SOPs', 'Create practical task ideas', 'Define evaluation focus areas'],
+            output: 'Interview kit for interviewers',
+            brandPowered: [0]
           },
           {
             num: 2,
             title: 'Interview Scheduling',
-            input: 'Interview kit',
-            process: ['Send scheduling email', 'Use company calendar', 'Send reminders automatically'],
-            output: 'Interview scheduled & logged'
+            input: 'Interview kit + Templates',
+            process: ['Send scheduling email ← Templates', 'Use company calendar', 'Send reminders automatically'],
+            output: 'Interview scheduled & logged',
+            brandPowered: [0]
           },
           {
             num: 3,
             title: 'Decision Recording',
             input: 'Completed interview',
-            process: ['Capture interview feedback', 'Record: Offer / Reject / Hold'],
-            output: 'Decision state saved'
+            process: ['Capture interview feedback', 'Record: Offer / Reject / Hold ← Policies'],
+            output: 'Decision state saved',
+            brandPowered: [1]
           },
           {
             num: 4,
             title: 'Decision Communication',
-            input: 'Decision',
-            process: ['Draft offer/rejection email', 'Apply company tone', 'Human approves & sends'],
-            output: 'Candidate informed + brand consistency'
+            input: 'Decision + Brand Context',
+            process: ['Draft offer/rejection email ← Templates', 'Apply company tone ← Brand Tone', 'Human approves & sends'],
+            output: 'Candidate informed + brand consistency',
+            brandPowered: [0, 1]
           },
           {
             num: 5,
             title: 'Hiring Visibility & Digest',
             input: 'All hiring data',
             process: ['Aggregate status across companies', 'Highlight pending decisions', 'Surface bottlenecks & strong candidates'],
-            output: 'Clear hiring overview for founder'
+            output: 'Clear hiring overview for founder',
+            brandPowered: []
           }
         ]
       }
@@ -860,6 +1240,65 @@
 
     let activeFlow = null;
     let activeStep = null;
+    let activeBrand = null;
+
+    // Brand Item Click Handlers
+    document.querySelectorAll('.brand-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const brandId = item.dataset.brand;
+        renderBrandDetail(brandId);
+      });
+    });
+
+    function renderBrandDetail(brandId) {
+      const brand = brandData[brandId];
+      const detailEl = document.getElementById('brand-detail');
+      const contentEl = document.getElementById('brand-detail-content');
+      
+      if (activeBrand === brandId) {
+        closeBrandDetail();
+        return;
+      }
+      
+      activeBrand = brandId;
+      
+      // Highlight active brand item
+      document.querySelectorAll('.brand-item').forEach(item => {
+        item.style.borderColor = item.dataset.brand === brandId ? '#ec4899' : '#fce7f3';
+        item.style.background = item.dataset.brand === brandId ? '#fdf2f8' : 'white';
+      });
+      
+      contentEl.innerHTML = `
+        <div class="brand-detail-section">
+          <h4>${brand.title}</h4>
+          <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">${brand.description}</p>
+          <div class="brand-detail-content">
+            <ul class="brand-detail-list">
+              ${brand.items.map(item => `<li>${item}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+        <div class="brand-detail-section">
+          <h4>📍 Used In</h4>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            ${brand.usedIn.map(use => `<span style="background:#fce7f3;color:#be185d;font-size:12px;padding:4px 10px;border-radius:20px;">${use}</span>`).join('')}
+          </div>
+        </div>
+      `;
+      
+      detailEl.classList.add('visible');
+    }
+
+    function closeBrandDetail() {
+      const detailEl = document.getElementById('brand-detail');
+      detailEl.classList.remove('visible');
+      activeBrand = null;
+      
+      document.querySelectorAll('.brand-item').forEach(item => {
+        item.style.borderColor = '#fce7f3';
+        item.style.background = 'white';
+      });
+    }
 
     function renderFlowDetail(flowId) {
       const flow = flowData[flowId];
@@ -898,7 +1337,7 @@
             </div>
             <div class="step-box step-box-process">
               <div class="step-box-label">Process</div>
-              <ul>${step.process.map(p => `<li>${p}</li>`).join('')}</ul>
+              <ul>${step.process.map((p, i) => `<li class="${step.brandPowered.includes(i) ? 'brand-powered' : ''}">${p}</li>`).join('')}</ul>
             </div>
             <div class="step-box step-box-output" style="background:${flow.light};">
               <div class="step-box-label">Output</div>
@@ -912,16 +1351,24 @@
         <div class="step-nav-item" data-step="${step.num}" style="background:${flow.light};color:#374151;">
           ${step.num}. ${step.title.split(' ').slice(0,2).join(' ')}
         </div>
-        ${i < flow.steps.length - 1 ? `<span class="step-nav-arrow" style="color:${flow.color};">�</span>` : ''}
+        ${i < flow.steps.length - 1 ? `<span class="step-nav-arrow" style="color:${flow.color};">→</span>` : ''}
       `).join('');
+      
+      const brandContextHtml = flow.brandContext.map(b => 
+        `<span style="background:#fce7f3;color:#be185d;font-size:11px;padding:3px 8px;border-radius:12px;margin-right:6px;">${brandData[b].title.split(' ')[0]} ${brandData[b].title.split(' ')[1]}</span>`
+      ).join('');
       
       detailEl.innerHTML = `
         <div class="flow-detail-header">
           <div>
             <span class="flow-detail-badge" style="background:${flow.light};color:${flow.color};">${flow.category}</span>
             <div class="flow-detail-title">${flow.title}</div>
+            <div style="margin-top:8px;">
+              <span style="font-size:11px;color:#6b7280;margin-right:8px;">Brand Context Used:</span>
+              ${brandContextHtml}
+            </div>
           </div>
-          <button class="close-btn" onclick="closeFlow('${flowId}')">�</button>
+          <button class="close-btn" onclick="closeFlow('${flowId}')">×</button>
         </div>
         <div class="step-nav">${navHtml}</div>
         <div class="steps-container">${stepsHtml}</div>

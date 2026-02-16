@@ -194,12 +194,16 @@ export default function Drafts() {
 
               {/* Email Detail */}
               {showEmailDetail && selectedDraftData.email && (
-                <div className="max-h-96 overflow-y-auto">
+                <Card className="bg-white border-gray-200 mb-4">
+                  <CardContent className="p-0">
+                    <div className="max-h-[400px] overflow-y-auto">
                   <EmailDetail
                     email={selectedDraftData.email}
                     companyName={selectedDraftData.company_name}
                   />
                 </div>
+                  </CardContent>
+                </Card>
               )}
 
               {/* Draft Editor */}
@@ -232,8 +236,9 @@ export default function Drafts() {
                     <textarea
                       value={editedBody}
                       onChange={(e) => setEditedBody(e.target.value)}
-                      rows={12}
-                      className="w-full px-3 py-2 rounded-md bg-white border border-gray-300 text-gray-900 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-400"
+                      rows={16}
+                      className="w-full px-3 py-2 rounded-md bg-white border border-gray-300 text-gray-900 text-sm resize-y min-h-[200px] max-h-[500px] focus:outline-none focus:ring-2 focus:ring-gray-400 overflow-y-auto"
+                      style={{ wordWrap: 'break-word', whiteSpace: 'pre-wrap' }}
                     />
                   </div>
                   {selectedDraftData.is_edited && (

@@ -37,12 +37,13 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o"  # Use GPT-4o for best quality, can override in .env
     
     # n8n
     N8N_WEBHOOK_URL: str = "http://localhost:5678/webhook"
     
     class Config:
-        env_file = ".env"
+        env_file = ".env"  # Read from .env file only
         case_sensitive = True
         extra = "ignore"  # Ignore extra fields in .env file
 

@@ -32,6 +32,8 @@ class EmailResponse(BaseModel):
     from_email: str
     to_email: str
     thread_id: Optional[str] = None
+    thread_history: list = []  # Previous emails in thread
+    thread_count: int = 0  # Number of previous emails
     function: Optional[str]
     intent: Optional[str]
     priority_score: Optional[str]

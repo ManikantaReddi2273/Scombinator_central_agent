@@ -58,3 +58,6 @@ Thumbs.db
 # Cursor
 .cursor/
 
+# Brand Context Documents (company-specific, not for version control)
+Brand Context Documents/
+
