@@ -89,7 +89,8 @@ class Flow1Orchestrator:
         self,
         company_id: str,
         email_data: Dict,
-        db: Optional[AsyncSession] = None
+        db: Optional[AsyncSession] = None,
+        brand_context: Optional[Dict] = None
     ) -> Flow1State:
         """
         Initialize Flow1State from email data and load thread history if available
@@ -148,7 +149,10 @@ class Flow1Orchestrator:
             email_id=None,
             draft_id=None,
             status="processing",
-            error_message=None
+            error_message=None,
+            
+            # Brand Context
+            brand_context=brand_context
         )
     
     async def _save_to_database(
@@ -325,8 +329,18 @@ class Flow1Orchestrator:
             Dict with email_id, draft_id, and status
         """
         try:
+            # Load brand context ONCE before graph execution
+            brand_context = None
+            try:
+                from services.brand_context_loader import brand_context_loader
+                brand_context = await brand_context_loader.load_all(db, company_id)
+                logger.info(f"Brand context loaded for company {company_id}")
+            except Exception as e:
+                logger.warning(f"Error loading brand context for company {company_id}: {str(e)}. Continuing without it.")
+                # Continue without brand context - nodes will handle None gracefully
+            
             # Initialize state (await the async method)
-            initial_state = await self._initialize_state(company_id, email_data, db=db)
+            initial_state = await self._initialize_state(company_id, email_data, db=db, brand_context=brand_context)
             
             # Run LangGraph workflow with config (pass db for draft generator)
             config = {"db": db}

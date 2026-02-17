@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # n8n
     N8N_WEBHOOK_URL: str = "http://localhost:5678/webhook"
     
+    # Redis
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
+    
     class Config:
         env_file = ".env"  # Read from .env file only
         case_sensitive = True

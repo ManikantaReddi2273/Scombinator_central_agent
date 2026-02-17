@@ -12,6 +12,9 @@ from services.tenant import tenant_service
 from services.audit_logger import audit_logger_service
 from auth.jwt import get_current_admin
 import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
 
@@ -118,6 +121,59 @@ async def connect_oauth(
         status=company.status,
         created_at=company.created_at,
         has_oauth_connected=True
+    )
+
+
+@router.post("/{company_id}/refresh-brand-context")
+async def refresh_brand_context(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """
+    Manually refresh brand context cache from Google Drive
+    
+    Forces reload of all brand context documents (COMPANY.md, VOICE.md, etc.)
+    from the company's Google Drive and updates the Redis cache.
+    """
+    from services.brand_context_loader import brand_context_loader
+    
+    # Check if company exists
+    company = await tenant_service.get_company_by_id(db, company_id)
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Company with id {company_id} not found"
+        )
+    
+    try:
+        # Refresh cache (deletes old cache and reloads from Drive)
+        brand_context = await brand_context_loader.refresh_cache(db, company_id)
+        
+        # Get list of loaded documents
+        full_context = brand_context.get("full", {})
+        loaded_documents = []
+        for key in ["company", "voice", "playbooks", "policies", "knowledge"]:
+            if full_context.get(key):
+                loaded_documents.append(f"{key.upper()}.md")
+        
+        templates_count = len(full_context.get("templates", {}))
+        if templates_count > 0:
+            loaded_documents.append(f"TEMPLATES ({templates_count} files)")
+        
+        return {
+            "status": "success",
+            "message": "Brand context refreshed successfully",
+            "company_id": company_id,
+            "company_name": company.name,
+            "loaded_documents": loaded_documents,
+            "total_documents": len(loaded_documents)
+        }
+    except Exception as e:
+        logger.error(f"Error refreshing brand context for company {company_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error refreshing brand context: {str(e)}"
     )
 
 

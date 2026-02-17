@@ -39,6 +39,19 @@ async def action_recommender_node(state: Flow1State) -> Dict:
     impact = state.get("impact", "Low")
     confidence = state.get("confidence", "Missing info")
     
+    # Get pricing policy from brand context (if available)
+    pricing_policy = ""
+    brand_context = state.get("brand_context")
+    if brand_context and isinstance(brand_context, dict):
+        key_points = brand_context.get("key_points", {})
+        if isinstance(key_points, dict):
+            pricing_policy = key_points.get("pricing_policy", "")
+    
+    # Add pricing policy context if available
+    policy_context = ""
+    if pricing_policy:
+        policy_context = f"\n\nCOMPANY POLICY:\n{pricing_policy}\n\nNOTE: Apply this policy when recommending actions for pricing-related inquiries.\n"
+    
     # Enhanced prompt with clear decision tree
     prompt = f"""You are an action recommendation system. Based on this email classification, recommend the SINGLE BEST next action.
 
@@ -48,6 +61,7 @@ EMAIL CLASSIFICATION:
 - Urgency: {urgency}
 - Impact: {impact}
 - Confidence: {confidence}
+{policy_context}
 
 AVAILABLE ACTIONS (choose exactly ONE):
 1. "Reply with template" - Standard automated response using company email template

@@ -8,6 +8,9 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import io
 from googleapiclient.http import MediaIoBaseDownload
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleAPIService:
@@ -178,6 +181,207 @@ class GoogleAPIService:
                 continue
         
         return templates
+    
+    async def find_folder_by_name(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        folder_name: str
+    ) -> Optional[str]:
+        """
+        Find folder by name in Google Drive
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            folder_name: Name of folder to find
+            
+        Returns:
+            Folder ID if found, None otherwise
+        """
+        try:
+            service = await self.get_drive_service(db, company_id)
+            
+            # Search for folder by exact name
+            query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            
+            results = service.files().list(
+                q=query,
+                fields="files(id, name)",
+                pageSize=10
+            ).execute()
+            
+            folders = results.get('files', [])
+            if folders:
+                logger.info(f"Found folder '{folder_name}' with ID: {folders[0]['id']}")
+                return folders[0]['id']
+            
+            logger.debug(f"Folder '{folder_name}' not found")
+            return None
+        except HttpError as error:
+            logger.error(f"Error finding folder '{folder_name}': {error}")
+            raise Exception(f"Error finding folder: {error}")
+    
+    async def list_files_in_folder(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        folder_id: str,
+        mime_type: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        List all files in a folder
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            folder_id: ID of the folder
+            mime_type: Optional MIME type filter
+            
+        Returns:
+            List of file metadata dicts (id, name, mimeType)
+        """
+        try:
+            service = await self.get_drive_service(db, company_id)
+            
+            # Build query
+            query = f"'{folder_id}' in parents and trashed=false"
+            if mime_type:
+                query += f" and mimeType='{mime_type}'"
+            
+            all_files = []
+            page_token = None
+            
+            # Handle pagination
+            while True:
+                results = service.files().list(
+                    q=query,
+                    fields="nextPageToken, files(id, name, mimeType)",
+                    pageSize=100,
+                    pageToken=page_token
+                ).execute()
+                
+                files = results.get('files', [])
+                all_files.extend(files)
+                
+                page_token = results.get('nextPageToken')
+                if not page_token:
+                    break
+            
+            logger.debug(f"Found {len(all_files)} files in folder {folder_id}")
+            return all_files
+        except HttpError as error:
+            logger.error(f"Error listing files in folder {folder_id}: {error}")
+            raise Exception(f"Error listing files in folder: {error}")
+    
+    async def load_brand_context_folder(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        company_name: str
+    ) -> Dict[str, Optional[str]]:
+        """
+        Load all brand context files from Google Drive
+        
+        Looks for "Brand Context Documents" folder, or falls back to company name folder.
+        Loads: COMPANY.md, VOICE.md, PLAYBOOKS.md, POLICIES.md, KNOWLEDGE.md, and TEMPLATES/
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            company_name: Company name (for fallback folder search)
+            
+        Returns:
+            Dict with keys: company, voice, playbooks, policies, knowledge, templates
+            Missing files will have None values
+        """
+        brand_context = {
+            "company": None,
+            "voice": None,
+            "playbooks": None,
+            "policies": None,
+            "knowledge": None,
+            "templates": {}
+        }
+        
+        try:
+            # Try to find "Brand Context Documents" folder first
+            folder_id = await self.find_folder_by_name(db, company_id, "Brand Context Documents")
+            
+            # If not found, try company name folder
+            if not folder_id:
+                folder_id = await self.find_folder_by_name(db, company_id, company_name)
+            
+            if not folder_id:
+                logger.warning(f"Brand context folder not found for {company_name}")
+                return brand_context
+            
+            # List all files in the folder
+            files = await self.list_files_in_folder(db, company_id, folder_id)
+            
+            # Load main documents (COMPANY.md, VOICE.md, etc.)
+            doc_names = ["COMPANY.md", "VOICE.md", "PLAYBOOKS.md", "POLICIES.md", "KNOWLEDGE.md"]
+            for file_info in files:
+                file_name = file_info['name']
+                if file_name in doc_names:
+                    try:
+                        content = await self.read_drive_file(db, company_id, file_info['id'])
+                        # Store without .md extension as key (lowercase)
+                        key = file_name.replace('.md', '').lower()
+                        brand_context[key] = content
+                        logger.info(f"Loaded {file_name} for company {company_name}")
+                    except Exception as e:
+                        logger.warning(f"Error loading {file_name}: {str(e)}")
+                        key = file_name.replace('.md', '').lower()
+                        brand_context[key] = None
+            
+            # Find and load TEMPLATES folder
+            templates_folder_id = None
+            for file_info in files:
+                if file_info['name'] == "TEMPLATES" and file_info['mimeType'] == 'application/vnd.google-apps.folder':
+                    templates_folder_id = file_info['id']
+                    break
+            
+            if templates_folder_id:
+                templates = {}
+                # List all files in TEMPLATES folder (including subfolders)
+                template_files = await self.list_files_in_folder(db, company_id, templates_folder_id)
+                
+                # Also check subfolders (outreach/, hiring/, responses/)
+                for file_info in template_files:
+                    # If it's a subfolder, list files inside it
+                    if file_info['mimeType'] == 'application/vnd.google-apps.folder':
+                        subfolder_name = file_info['name']
+                        subfolder_files = await self.list_files_in_folder(db, company_id, file_info['id'])
+                        for sub_file in subfolder_files:
+                            # Store with subfolder prefix: "outreach/template_name.md"
+                            template_key = f"{subfolder_name}/{sub_file['name']}"
+                            try:
+                                content = await self.read_drive_file(db, company_id, sub_file['id'])
+                                templates[template_key] = content
+                                logger.debug(f"Loaded template: {template_key}")
+                            except Exception as e:
+                                logger.warning(f"Error loading template {template_key}: {str(e)}")
+                    else:
+                        # Direct template file in TEMPLATES folder
+                        template_name = file_info['name']
+                        # Only load text/markdown files
+                        if file_info['mimeType'] in ['text/plain', 'text/markdown'] or template_name.endswith('.md'):
+                            try:
+                                content = await self.read_drive_file(db, company_id, file_info['id'])
+                                templates[template_name] = content
+                                logger.debug(f"Loaded template: {template_name}")
+                            except Exception as e:
+                                logger.warning(f"Error loading template {template_name}: {str(e)}")
+                
+                brand_context['templates'] = templates
+                logger.info(f"Loaded {len(templates)} templates for company {company_name}")
+            
+            return brand_context
+            
+        except Exception as e:
+            logger.error(f"Error loading brand context folder for {company_name}: {str(e)}")
+            return brand_context
 
 
 # Singleton instance

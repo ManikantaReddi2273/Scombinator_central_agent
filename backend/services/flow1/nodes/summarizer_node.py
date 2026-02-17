@@ -29,6 +29,14 @@ async def summarizer_node(state: Flow1State) -> Dict:
     intent = state.get("intent", "Inquiry")
     thread_count = state.get("thread_count", 0)
     
+    # Get company name from brand context (if available)
+    company_name = "Company"
+    brand_context = state.get("brand_context")
+    if brand_context and isinstance(brand_context, dict):
+        key_points = brand_context.get("key_points", {})
+        if isinstance(key_points, dict):
+            company_name = key_points.get("company_name", "Company")
+    
     # Truncate body to 1500 chars for context
     body_truncated = body[:1500] if len(body) > 1500 else body
     
@@ -39,6 +47,9 @@ async def summarizer_node(state: Flow1State) -> Dict:
     
     # Enhanced prompt with better examples and structure
     prompt = f"""Create an executive summary that explains WHAT THIS EMAIL MEANS FOR THE BUSINESS and WHAT ACTION IS NEEDED. Do NOT quote or paraphrase the email content.
+
+COMPANY CONTEXT:
+Company: {company_name}
 
 EMAIL DETAILS:
 Subject: {subject}

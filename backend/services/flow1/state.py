@@ -29,6 +29,12 @@ class Flow1State(TypedDict):
     thread_history: List[Dict]  # Previous emails in thread for context (empty list if new thread)
     thread_count: int  # Number of previous emails (0 = new thread)
     
+    # Brand Context (loaded once before graph execution)
+    # Structure: {"full": {...}, "key_points": {...}}
+    # - full: Complete documents (company, voice, playbooks, policies, knowledge, templates)
+    # - key_points: Extracted lightweight points for optimization (~200-300 tokens)
+    brand_context: Optional[Dict]
+    
     # Step 2: Classification (output)
     function: Optional[str]  # Sales/Hiring/Legal/Support/Ops/Marketing/Admin
     intent: Optional[str]  # Inquiry/Follow-up/Objection/Scheduling/Application/FAQ/Complaint

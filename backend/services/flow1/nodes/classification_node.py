@@ -32,6 +32,14 @@ async def classification_node(state: Flow1State) -> Dict:
     thread_history = state.get("thread_history", [])  # Always a list
     thread_count = state.get("thread_count", 0)  # Always an int
     
+    # Get company name from brand context (if available)
+    company_name = "Company"
+    brand_context = state.get("brand_context")
+    if brand_context and isinstance(brand_context, dict):
+        key_points = brand_context.get("key_points", {})
+        if isinstance(key_points, dict):
+            company_name = key_points.get("company_name", "Company")
+    
     # Truncate body to 2000 chars to avoid token limits
     body_truncated = body[:2000] if len(body) > 2000 else body
     
@@ -50,6 +58,9 @@ async def classification_node(state: Flow1State) -> Dict:
     
     # Enhanced prompt with detailed examples and clear instructions
     prompt = f"""You are an expert business email classifier. Analyze this email CAREFULLY and classify it across 5 dimensions. Read the ENTIRE email, not just the subject.
+
+COMPANY CONTEXT:
+Company: {company_name}
 
 EMAIL TO CLASSIFY:
 Subject: {subject}

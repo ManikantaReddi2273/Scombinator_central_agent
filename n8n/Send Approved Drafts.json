@@ -123,12 +123,68 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Prepare email data for Gmail API\n// Get email data from current item (Get Email Info output)\nconst email = $json;\n// Get merged draft & token data from Merge Draft & Token node\nconst merged = $('Merge Draft & Token').item.json;\n\nconsole.log('Prepare Email Message - Email data:', JSON.stringify({\n  email_id: email.id,\n  from_email: email.from_email,\n  thread_id: email.thread_id\n}, null, 2));\n\nconsole.log('Prepare Email Message - Merged data:', JSON.stringify({\n  draft_id: merged.draft_id,\n  draft_subject: merged.draft_subject,\n  company_id: merged.company_id,\n  has_access_token: !!merged.access_token\n}, null, 2));\n\n// Validate required data\nif (!email || !email.from_email) {\n  throw new Error('Email data is missing or invalid');\n}\n\nif (!merged || !merged.draft_id || !merged.draft_subject || !merged.draft_body) {\n  throw new Error('Draft data is missing or invalid');\n}\n\nif (!merged.access_token) {\n  throw new Error('Access token missing - cannot send email');\n}\n\n// Build email message\nconst toEmail = email.from_email;\nconst subject = merged.draft_subject;\nconst body = merged.draft_body;\nconst threadId = email.thread_id || null;\nconst fromEmail = merged.company_email;\n\n// Create email message in RFC 2822 format\nconst message = [\n  `From: ${fromEmail}`,\n  `To: ${toEmail}`,\n  `Subject: ${subject}`,\n  `Content-Type: text/plain; charset=utf-8`,\n  '',\n  body\n].join('\\n');\n\n// Encode message in base64url format (Gmail API requires this)\nconst encodedMessage = Buffer.from(message)\n  .toString('base64')\n  .replace(/\\+/g, '-')\n  .replace(/\\//g, '_')\n  .replace(/=+$/, '');\n\nconst result = {\n  draft_id: merged.draft_id,\n  company_id: merged.company_id,\n  access_token: merged.access_token,\n  to: toEmail,\n  subject: subject,\n  body: body,\n  thread_id: threadId,\n  raw_message: encodedMessage\n};\n\nconsole.log('Prepare Email Message - Result:', JSON.stringify({\n  draft_id: result.draft_id,\n  to: result.to,\n  subject: result.subject,\n  has_thread_id: !!result.thread_id,\n  has_access_token: !!result.access_token\n}, null, 2));\n\nreturn result;"
+        "jsCode": "// Fetch original email's Message-ID from Gmail API for threading\n// Get email data from Get Email Info node\nconst email = $json;\n// Get merged draft & token data from Merge Draft & Token node\nconst merged = $('Merge Draft & Token').item.json;\n\nconsole.log('Get Original Message - Email data:', JSON.stringify({\n  email_id: email.id,\n  gmail_message_id: email.gmail_message_id,\n  thread_id: email.thread_id\n}, null, 2));\n\n// Only fetch if this is a reply (has thread_id and gmail_message_id)\nif (!email.thread_id || !email.gmail_message_id) {\n  console.log('Not a reply - skipping Message-ID fetch');\n  return {\n    is_reply: false,\n    original_message_id: null,\n    references: null\n  };\n}\n\nif (!merged || !merged.access_token) {\n  console.log('No access token - skipping Message-ID fetch');\n  return {\n    is_reply: false,\n    original_message_id: null,\n    references: null\n  };\n}\n\n// Return data for HTTP Request node to fetch original message\nreturn {\n  email_id: email.id,\n  gmail_message_id: email.gmail_message_id,\n  thread_id: email.thread_id,\n  access_token: merged.access_token,\n  from_email: email.from_email,\n  to_email: email.to_email,\n  subject: email.subject\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         1780,
+        200
+      ],
+      "id": "prepare-message-fetch",
+      "name": "Prepare Message Fetch"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.gmail_message_id ? 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + $json.gmail_message_id : null }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "format",
+                "value": "full"
+              }
+            ]
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          },
+          "timeout": 30000
+        },
+        "continueOnFail": true
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2000,
+        200
+      ],
+      "id": "get-original-message",
+      "name": "Get Original Message (for threading)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Prepare email data for Gmail API with proper threading headers\n// Get email data from Get Email Info node (not from current item which is Get Original Message)\nconst email = $('Get Email Info').item.json;\n// Get merged draft & token data from Merge Draft & Token node\nconst merged = $('Merge Draft & Token').item.json;\n// Get original message data (if available)\nlet originalMessage = null;\ntry {\n  // Try to get from the previous node's output\n  const originalMsgItems = $('Get Original Message (for threading)').all();\n  if (originalMsgItems && originalMsgItems.length > 0 && originalMsgItems[0].json) {\n    const msgData = originalMsgItems[0].json;\n    // Check if it's a valid response (not an error)\n    if (msgData && !msgData.error && msgData.payload) {\n      originalMessage = msgData;\n      console.log('Found original message for threading');\n    } else {\n      console.log('Original message response is invalid or error:', msgData);\n    }\n  } else {\n    console.log('No original message items found');\n  }\n} catch (e) {\n  console.log('No original message found (new conversation):', e.message);\n}\n\nconsole.log('Prepare Email Message - Email data:', JSON.stringify({\n  email_id: email.id,\n  from_email: email.from_email,\n  thread_id: email.thread_id,\n  gmail_message_id: email.gmail_message_id\n}, null, 2));\n\nconsole.log('Prepare Email Message - Merged data:', JSON.stringify({\n  draft_id: merged.draft_id,\n  draft_subject: merged.draft_subject,\n  company_id: merged.company_id,\n  has_access_token: !!merged.access_token\n}, null, 2));\n\n// Validate required data\nif (!email || !email.from_email) {\n  throw new Error('Email data is missing or invalid');\n}\n\nif (!merged || !merged.draft_id || !merged.draft_subject || !merged.draft_body) {\n  throw new Error('Draft data is missing or invalid');\n}\n\nif (!merged.access_token) {\n  throw new Error('Access token missing - cannot send email');\n}\n\n// Build email message\nconst toEmail = email.from_email;\nlet subject = merged.draft_subject;\nconst body = merged.draft_body;\nconst threadId = email.thread_id || null;\nconst fromEmail = merged.company_email;\n\n// Extract Message-ID from original email if it's a reply\nlet inReplyTo = null;\nlet references = null;\nlet originalMessageId = null;\n\nif (originalMessage && originalMessage.payload && originalMessage.payload.headers) {\n  const headers = originalMessage.payload.headers;\n  \n  // Find Message-ID header\n  const messageIdHeader = headers.find(h => h.name.toLowerCase() === 'message-id');\n  if (messageIdHeader) {\n    originalMessageId = messageIdHeader.value;\n    inReplyTo = originalMessageId;\n    \n    // Build References header (should include all Message-IDs in thread)\n    const referencesHeader = headers.find(h => h.name.toLowerCase() === 'references');\n    if (referencesHeader && referencesHeader.value) {\n      references = referencesHeader.value + ' ' + originalMessageId;\n    } else {\n      references = originalMessageId;\n    }\n  }\n  \n  console.log('Threading headers found:', {\n    originalMessageId: originalMessageId,\n    inReplyTo: inReplyTo,\n    references: references\n  });\n}\n\n// Generate new Message-ID for this reply\n// Format: <timestamp.random@domain>\nconst timestamp = Date.now();\nconst random = Math.random().toString(36).substring(2, 15);\nconst domain = fromEmail.split('@')[1] || 'resolvely.com';\nconst newMessageId = `<${timestamp}.${random}@${domain}>`;\n\n// Ensure subject has Re: prefix if it's a reply and doesn't already have it\nif (threadId && !subject.match(/^Re:\\s*/i)) {\n  subject = `Re: ${subject}`;\n  console.log('Added Re: prefix to subject:', subject);\n}\n\n// Build email headers\nconst headers = [\n  `From: ${fromEmail}`,\n  `To: ${toEmail}`,\n  `Subject: ${subject}`,\n  `Message-ID: ${newMessageId}`\n];\n\n// Add threading headers if this is a reply\nif (inReplyTo) {\n  headers.push(`In-Reply-To: ${inReplyTo}`);\n  headers.push(`References: ${references}`);\n  console.log('Added threading headers for reply');\n}\n\nheaders.push(`Content-Type: text/plain; charset=utf-8`);\nheaders.push(''); // Empty line before body\n\n// Create email message in RFC 2822 format\nconst message = headers.join('\\n') + body;\n\n// Encode message in base64url format (Gmail API requires this)\nconst encodedMessage = Buffer.from(message)\n  .toString('base64')\n  .replace(/\\+/g, '-')\n  .replace(/\\//g, '_')\n  .replace(/=+$/, '');\n\nconst result = {\n  draft_id: merged.draft_id,\n  company_id: merged.company_id,\n  access_token: merged.access_token,\n  to: toEmail,\n  subject: subject,\n  body: body,\n  thread_id: threadId,\n  raw_message: encodedMessage,\n  has_threading_headers: !!inReplyTo\n};\n\nconsole.log('Prepare Email Message - Result:', JSON.stringify({\n  draft_id: result.draft_id,\n  to: result.to,\n  subject: result.subject,\n  has_thread_id: !!result.thread_id,\n  has_threading_headers: result.has_threading_headers,\n  has_access_token: !!result.access_token\n}, null, 2));\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
         200
       ],
       "id": "prepare-email",
@@ -142,7 +198,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2000,
+        2440,
         200
       ],
       "id": "prepare-gmail-request",
@@ -182,7 +238,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2220,
+        2660,
         200
       ],
       "id": "send-email",
@@ -196,7 +252,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2440,
+        2880,
         200
       ],
       "id": "preserve-draft-id",
@@ -232,7 +288,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2660,
+        3100,
         200
       ],
       "id": "mark-draft-sent",
@@ -247,7 +303,7 @@
       "typeVersion": 1,
       "position": [
         2660,
-        200
+        400
       ],
       "id": "error-handler",
       "name": "Error Handler"
@@ -350,7 +406,7 @@
       "main": [
         [
           {
-            "node": "Prepare Email Message",
+            "node": "Prepare Message Fetch",
             "type": "main",
             "index": 0
           }
@@ -360,6 +416,46 @@
         [
           {
             "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message Fetch": {
+      "main": [
+        [
+          {
+            "node": "Get Original Message (for threading)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Original Message (for threading)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Prepare Email Message",
             "type": "main",
             "index": 0
           }

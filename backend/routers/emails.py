@@ -287,6 +287,7 @@ async def get_email(
         from_email=email.from_email,
         to_email=email.to_email,
         thread_id=email.thread_id,
+        gmail_message_id=email.gmail_message_id,  # Include for threading
         thread_history=thread_history,
         thread_count=thread_count,
         function=email.function,

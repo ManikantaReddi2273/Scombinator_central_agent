@@ -32,6 +32,7 @@ class EmailResponse(BaseModel):
     from_email: str
     to_email: str
     thread_id: Optional[str] = None
+    gmail_message_id: Optional[str] = None  # Gmail message ID for threading
     thread_history: list = []  # Previous emails in thread
     thread_count: int = 0  # Number of previous emails
     function: Optional[str]

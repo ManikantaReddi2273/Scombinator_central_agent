@@ -146,34 +146,117 @@ async def draft_generator_node(state: Flow1State, config=None) -> Dict:
     thread_history = state.get("thread_history", [])  # Always a list
     thread_count = state.get("thread_count", 0)  # Always an int
     
-    # Get company templates and brand tone for context
+    # Get brand context from state (full context for draft generation)
     templates = {}
     brand_tone = None
+    knowledge = None
+    company_info = None
+    policies = None
+    playbooks = None
     
-    # Extract db from config if available
-    db = None
-    if config and isinstance(config, dict):
-        db = config.get("db")
+    brand_context = state.get("brand_context")
+    if brand_context and isinstance(brand_context, dict):
+        full_context = brand_context.get("full", {})
+        if isinstance(full_context, dict):
+            # Get full documents
+            templates = full_context.get("templates", {})
+            voice_content = full_context.get("voice", "")
+            knowledge = full_context.get("knowledge", "")
+            company_info = full_context.get("company", "")
+            policies = full_context.get("policies", "")
+            playbooks = full_context.get("playbooks", "")
+            
+            # Use full voice content (not truncated) - it's critical for brand consistency
+            if voice_content:
+                brand_tone = voice_content  # Use full document for better context
     
-    if db and company_id:
-        try:
-            templates = await policy_loader_service.get_templates(db, company_id)
-            brand_tone = await policy_loader_service.get_brand_tone(db, company_id)
-        except Exception as e:
-            logger.warning(f"Error loading company templates for {company_id}: {str(e)}")
-            # Continue with defaults
+    # Fallback: Try old policy_loader_service if brand context not available
+    if not templates and not brand_tone:
+        # Extract db from config if available
+        db = None
+        if config and isinstance(config, dict):
+            db = config.get("db")
+        
+        if db and company_id:
+            try:
+                from services.policy_loader import policy_loader_service
+                templates = await policy_loader_service.get_templates(db, company_id)
+                brand_tone = await policy_loader_service.get_brand_tone(db, company_id)
+            except Exception as e:
+                logger.warning(f"Error loading company templates for {company_id}: {str(e)}")
+                # Continue with defaults
+    
+    # Check for specific template match first (e.g., pricing_inquiry.md, demo requests)
+    matched_template = None
+    template_key = None
+    
+    # For pricing inquiries, use the pricing_inquiry template
+    if function == "Sales" and ("pricing" in email_body.lower() or "price" in email_body.lower() or "cost" in email_body.lower()):
+        # Look for pricing_inquiry template
+        for key in templates.keys():
+            if "pricing" in key.lower() or "price" in key.lower():
+                matched_template = templates[key]
+                template_key = key
+                logger.info(f"Using matched template: {key}")
+                break
+    
+    # For demo/scheduling requests, look for demo-related templates
+    elif recommended_action == "Schedule meeting" or ("demo" in email_body.lower() or "schedule" in email_body.lower()):
+        # Look for demo-related templates
+        for key in templates.keys():
+            if "demo" in key.lower() or "schedule" in key.lower() or "meeting" in key.lower():
+                matched_template = templates[key]
+                template_key = key
+                logger.info(f"Using matched template: {key}")
+                break
     
     # Build context from templates if available
     template_context = ""
-    if templates:
+    if matched_template:
+        # Use the matched template as primary guidance
+        template_context = f"\n\nUSE THIS TEMPLATE AS YOUR PRIMARY GUIDE (follow its structure and tone):\n{matched_template}"
+    elif templates:
         template_names = list(templates.keys())[:5]  # Limit to first 5 for context
         template_context = f"\n\nAvailable company templates for reference: {', '.join(template_names)}"
         # Include a sample template if available
-        if "general_response_template.txt" in templates:
-            sample_template = templates["general_response_template.txt"][:200]  # First 200 chars
-            template_context += f"\n\nSample template structure:\n{sample_template}"
+        if templates:
+            first_template_key = list(templates.keys())[0]
+            sample_template = templates[first_template_key][:500] if templates[first_template_key] else ""  # First 500 chars
+            if sample_template:
+                template_context += f"\n\nSample template structure:\n{sample_template}"
     
-    tone_context = f"\n\nBrand tone to match: {brand_tone}" if brand_tone else ""
+    # Brand voice context (full document)
+    tone_context = f"\n\nBRAND VOICE AND TONE (CRITICAL - FOLLOW THESE RULES EXACTLY):\n{brand_tone}" if brand_tone else ""
+    
+    # Add knowledge/FAQs context if available
+    knowledge_context = ""
+    if knowledge:
+        # Use first 800 chars of knowledge for FAQ context
+        knowledge_preview = knowledge[:800]
+        knowledge_context = f"\n\nCompany Knowledge Base (FAQs and approved answers):\n{knowledge_preview}"
+    
+    # Add policies context (especially pricing policy)
+    policies_context = ""
+    if policies:
+        # Extract pricing policy section if available
+        if "pricing" in policies.lower() or "price" in policies.lower():
+            # Find pricing section
+            policies_lower = policies.lower()
+            pricing_start = policies_lower.find("pricing")
+            if pricing_start != -1:
+                pricing_section = policies[max(0, pricing_start-100):pricing_start+1000]
+                policies_context = f"\n\nCRITICAL POLICY (MUST FOLLOW):\n{pricing_section}"
+            else:
+                policies_context = f"\n\nCompany Policies (first 800 chars):\n{policies[:800]}"
+        else:
+            policies_context = f"\n\nCompany Policies (first 800 chars):\n{policies[:800]}"
+    
+    # Add company info context
+    company_context = ""
+    if company_info:
+        # Extract key company details (first 600 chars)
+        company_preview = company_info[:600]
+        company_context = f"\n\nCompany Information:\n{company_preview}"
     
     # Truncate email body for context
     body_truncated = email_body[:2000] if len(email_body) > 2000 else email_body
@@ -206,11 +289,33 @@ ACTION TYPE: Ask for Missing Information
 - Offer to help once information is received"""
     elif recommended_action == "Schedule meeting":
         action_guidance = """
-ACTION TYPE: Schedule Meeting
-- Acknowledge the meeting request
-- Suggest 2-3 specific time options
-- Ask for their preference or availability
-- Include meeting purpose/agenda if relevant"""
+ACTION TYPE: Schedule Meeting (CRITICAL - MUST INCLUDE SPECIFIC TIMES)
+- Get to the point quickly: "Happy to schedule a demo"
+- Answer their questions briefly (1-2 sentences each)
+- MUST suggest 2-3 SPECIFIC time slots (e.g., "Tuesday at 2 PM IST", "Wednesday at 10 AM IST", "Thursday at 4 PM IST")
+- Keep it short and direct (2-3 paragraphs max)
+- Make it easy for them to pick a time
+- Example structure:
+  "Hi [Name],
+  
+  Happy to schedule a demo! I can show you how Resolvely works and answer your questions about onboarding, integrations, and training.
+  
+  Here are a few times that work for me next week:
+  - Tuesday, [date] at 2 PM IST
+  - Wednesday, [date] at 10 AM IST  
+  - Thursday, [date] at 4 PM IST
+  
+  Which works best for you? Or suggest another time if these don't work.
+  
+  Best,"""
+    elif function == "Sales" and ("pricing" in email_body.lower() or "price" in email_body.lower()):
+        action_guidance = """
+ACTION TYPE: Pricing Inquiry (CRITICAL POLICY)
+- NEVER discuss specific pricing, tiers, or packages in email
+- ALWAYS route to a call: "Pricing depends on your specific setup and volume — I want to make sure I give you accurate numbers rather than a generic range. Can we do a quick 15-min call to go through it?"
+- Keep it friendly, not evasive
+- Make the call sound quick and valuable (not a sales pitch)
+- Use the pricing_inquiry template if available"""
     else:  # Reply with template
         action_guidance = """
 ACTION TYPE: Standard Response
@@ -220,7 +325,7 @@ ACTION TYPE: Standard Response
 - Be professional and friendly"""
     
     # Optimized prompt with better structure and specific instructions
-    prompt = f"""You are a professional email writer. Write a COMPLETE, DETAILED email response that directly addresses the sender's inquiry. This email will be sent to a real person - make it helpful, specific, and actionable.
+    prompt = f"""You are a professional email writer for {company_info.splitlines()[0].replace('**Company Name** |', '').strip() if company_info else 'a company'}. Write a COMPLETE, DETAILED email response that directly addresses the sender's inquiry. This email will be sent to a real person - make it helpful, specific, and actionable.
 
 ORIGINAL EMAIL RECEIVED:
 Subject: {email_subject}
@@ -232,32 +337,50 @@ EMAIL CONTEXT:
 - Business Function: {function}
 - Email Intent: {intent}
 - Recommended Action: {recommended_action}
+{company_context}
 {tone_context}
 {template_context}
+{knowledge_context}
+{policies_context}
 {action_guidance}
 
 CRITICAL INSTRUCTIONS:
 1. READ THE ORIGINAL EMAIL CAREFULLY - What specific question or request did they make?
 2. ADDRESS THEIR ACTUAL QUESTION - Don't give a generic response. Answer what they asked.
-3. BE SPECIFIC AND HELPFUL - Provide real information, not vague promises
-4. INCLUDE NEXT STEPS - What happens next? What should they do?
-5. MINIMUM 3-4 PARAGRAPHS - This should be a substantial, helpful response
+3. FOLLOW BRAND VOICE RULES EXACTLY - See brand voice section above for specific rules
+4. FOLLOW POLICIES EXACTLY - See policies section above, especially for pricing inquiries
+5. USE TEMPLATE IF PROVIDED - If a template is provided, follow its structure and tone closely
+6. BE SPECIFIC AND HELPFUL - Provide real information, not vague promises
+7. INCLUDE NEXT STEPS - What happens next? What should they do?
 
 WRITING REQUIREMENTS:
 
 1. STRUCTURE (include all parts):
-   - Professional greeting (Hi/Hello [Name if available], or "Hello" if name unknown)
-   - Opening: Acknowledge their email/inquiry
+   - Professional greeting (Hi/Hello [Name if available], or "Hi there" if name unknown)
+   - Opening: Acknowledge their email/inquiry (1-2 sentences)
    - Body: Address their question/request (2-3 paragraphs)
-   - Closing: Professional sign-off (Best regards, Sincerely, etc.)
+   - Closing: Professional sign-off (see brand voice rules for approved sign-offs)
 
-2. CONTENT GUIDELINES:
+2. BRAND VOICE RULES (MUST FOLLOW):
+   - Get to the point quickly - first sentence should tell them why you're writing
+   - Use "you" and "your" - make it about them, not us
+   - Use contractions: "We're" not "We are", "you'll" not "you will"
+   - One idea per paragraph - short paragraphs (2-3 sentences max)
+   - End with a clear next step
+   - NEVER use "Best regards" - use "Best," or "Cheers," instead
+   - NEVER use "I hope this email finds you well" - it's filler
+   - NEVER use "please do not hesitate to contact" - just say "reply to this email"
+   - NEVER use corporate jargon: "synergy", "leverage", "circle back", "touch base"
+   - Keep it under 5 paragraphs for most emails
+   - Sound like a human wrote it, not a robot
+
+3. CONTENT GUIDELINES:
    - Address their specific question or request from the original email
    - Be helpful, clear, and professional
-   - Match the brand tone: {brand_tone if brand_tone else 'professional and friendly'}
-   - Keep total length: 3-5 paragraphs (concise but complete)
+   - Match the brand tone exactly (see brand voice section above)
+   - Keep total length appropriate (2-4 paragraphs for most emails, longer only if needed)
 
-3. FUNCTION-SPECIFIC TONE:
+4. FUNCTION-SPECIFIC TONE:
    - Sales: Helpful, informative, suggest next steps, include value proposition
    - Hiring: Professional, acknowledge application, set clear expectations, mention timeline
    - Support: Empathetic, solution-focused, offer help, provide next steps
@@ -265,45 +388,56 @@ WRITING REQUIREMENTS:
    - Marketing: Engaging, informative, highlight benefits
    - Ops: Clear, action-oriented, provide status/next steps
 
-4. FORBIDDEN (do NOT include):
+5. FORBIDDEN (do NOT include):
    - Markdown formatting (**, ---, #, etc.)
    - Code blocks or instructions
    - Placeholders like [Your Name], [Company Name]
    - Meta-commentary or notes
    - Explanations about the email itself
    - "Here's a response" or similar phrases
+   - "Best regards" (use "Best," instead)
+   - Corporate jargon
 
-5. OUTPUT FORMAT:
+6. OUTPUT FORMAT:
    - Plain text only
    - No quotes around the text
    - No markdown
    - Ready to send directly
 
-EXAMPLE FOR SALES PRICING INQUIRY:
-Hello,
+EXAMPLE FOR SALES PRICING INQUIRY (following brand voice and pricing policy):
+Hi Sarah,
 
-Thank you for reaching out about enterprise pricing for your team of 50+ employees. I'd be happy to provide you with detailed pricing information and help you understand how our platform can meet your needs.
+Great question! Pricing depends on your setup — ticket volume, integrations, how you want to use it.
 
-Our enterprise pricing is customized based on your specific requirements, including the number of users, features needed, and any integrations. For a team of your size, we typically offer volume discounts and can provide flexible payment terms.
+Rather than give you a generic number, I'd prefer to understand your situation and give you accurate pricing. It's a quick 15-minute call.
 
-I'd like to schedule a brief call this week to discuss your specific needs in detail. This will help me prepare a tailored proposal that includes:
-- Detailed pricing breakdown
-- Feature comparison with our standard plan
-- Available integrations for your tech stack
-- Implementation timeline and support options
+What works this week?
 
-Would Tuesday or Wednesday afternoon work for you? I can also send you our enterprise pricing guide in the meantime if you'd prefer to review it first.
+Best,
+[Your Name]
 
-Looking forward to speaking with you.
+EXAMPLE FOR DEMO/SCHEDULING REQUEST (following brand voice - short, direct, specific times):
+Hi Michael,
 
-Best regards
+Happy to schedule a demo! I can show you how Resolvely works and answer your questions about onboarding, integrations, and training.
+
+Here are a few times that work for me next week:
+- Tuesday at 2 PM IST
+- Wednesday at 10 AM IST
+- Thursday at 4 PM IST
+
+Which works best for you? Or suggest another time if these don't work.
+
+Best,
+[Your Name]
 
 NOW WRITE THE EMAIL RESPONSE:
 Based on the original email above, write a COMPLETE, DETAILED response that:
 - Directly answers their specific question/request
 - Provides helpful, actionable information
 - Includes clear next steps
-- Is at least 3-4 paragraphs long
+- For scheduling requests: MUST include 2-3 specific time slots (day and time)
+- Length: 2-4 paragraphs (shorter is better - be concise)
 - Sounds professional and helpful
 
 Return ONLY the email body text, nothing else:"""
@@ -344,14 +478,39 @@ Return ONLY the email body text, nothing else:"""
             # Enhance the draft with more context
             draft_body = _enhance_draft(draft_body, email_subject, email_body, function, intent, recommended_action)
         
-        # Apply brand tone adjustments if needed (additional refinement)
+        # Apply brand tone adjustments and enforce brand voice rules
         if brand_tone:
+            # Enforce brand voice rules - remove forbidden phrases
+            draft_body = draft_body.replace("Best regards", "Best,")
+            draft_body = draft_body.replace("Warm regards", "Best,")
+            draft_body = draft_body.replace("Kind regards", "Best,")
+            draft_body = draft_body.replace("Thanks and regards", "Thanks,")
+            draft_body = draft_body.replace("I hope this email finds you well", "")
+            draft_body = draft_body.replace("please do not hesitate to contact", "reply to this email")
+            draft_body = draft_body.replace("Please do not hesitate to contact", "Reply to this email")
+            
+            # Remove corporate jargon
+            draft_body = draft_body.replace("leverage", "use")
+            draft_body = draft_body.replace("Leverage", "Use")
+            draft_body = draft_body.replace("utilize", "use")
+            draft_body = draft_body.replace("Utilize", "Use")
+            draft_body = draft_body.replace("facilitate", "help")
+            draft_body = draft_body.replace("Facilitate", "Help")
+            draft_body = draft_body.replace("circle back", "follow up")
+            draft_body = draft_body.replace("Circle back", "Follow up")
+            draft_body = draft_body.replace("touch base", "connect")
+            draft_body = draft_body.replace("Touch base", "Connect")
+            
+            # Ensure contractions are used
+            draft_body = draft_body.replace("We are", "We're")
+            draft_body = draft_body.replace("we are", "we're")
+            draft_body = draft_body.replace("You will", "You'll")
+            draft_body = draft_body.replace("you will", "you'll")
+            draft_body = draft_body.replace("I would", "I'd")
+            draft_body = draft_body.replace("i would", "I'd")
+            
             tone_lower = brand_tone.lower()
-            if "formal" in tone_lower:
-                draft_body = draft_body.replace("Hi ", "Hello ").replace("Thanks", "Thank you")
-            elif "casual" in tone_lower or "friendly" in tone_lower:
-                draft_body = draft_body.replace("Hello ", "Hi ").replace("Sincerely", "Best regards")
-            elif "short" in tone_lower or "brief" in tone_lower:
+            if "short" in tone_lower or "brief" in tone_lower:
                 # Keep only first 3-4 paragraphs
                 paragraphs = [p.strip() for p in draft_body.split('\n\n') if p.strip()]
                 draft_body = '\n\n'.join(paragraphs[:4])
@@ -385,80 +544,103 @@ Return ONLY the email body text, nothing else:"""
 
 
 def _enhance_draft(base_draft: str, subject: str, body: str, function: str, intent: str, action: str) -> str:
-    """Enhance a draft with context-aware content"""
+    """Enhance a draft with context-aware content following brand voice"""
     # Extract key information from email
     body_lower = body.lower()
     
-    # Build context-aware response
-    if function == "Sales" and "pricing" in body_lower:
-        return f"""Hello,
+    # Extract name from email if possible
+    name = "there"
+    if "regards" in body_lower or "best" in body_lower:
+        # Try to extract name from signature
+        lines = body.split('\n')
+        for line in lines[-5:]:  # Check last 5 lines
+            if len(line.strip()) > 0 and len(line.strip()) < 50:
+                name = line.strip().split()[0] if line.strip().split() else "there"
+                break
+    
+    # Build context-aware response following brand voice
+    if function == "Sales" and ("pricing" in body_lower or "price" in body_lower):
+        return f"""Hi {name},
 
-Thank you for your interest in our platform. I'd be happy to provide you with detailed pricing information for your team.
+Great question! Pricing depends on your setup — ticket volume, integrations, how you want to use it.
 
-Based on your inquiry about enterprise pricing, I can prepare a customized quote that fits your needs. Would you be available for a brief call this week to discuss your specific requirements? This will help me provide you with the most accurate pricing and feature comparison.
+Rather than give you a generic number, I'd prefer to understand your situation and give you accurate pricing. It's a quick 15-minute call.
 
-I'll also send you our detailed feature comparison document and integration options.
+What works this week?
 
-Looking forward to speaking with you.
-
-Best regards"""
+Best,"""
     
     elif function == "Sales" and intent == "Inquiry":
-        return f"""Hello,
+        return f"""Hi {name},
 
-Thank you for reaching out. I'd be happy to help answer your questions about our platform.
+Thanks for reaching out. I'd be happy to help answer your questions about our platform.
 
 {_extract_key_question(body)}
 
-Let me provide you with the information you need and suggest next steps for moving forward.
+Let me provide you with the information you need and suggest next steps.
 
-Best regards"""
+Best,"""
     
     elif function == "Hiring" and intent == "Application":
-        return f"""Hello,
+        return f"""Hi {name},
 
-Thank you for your interest in joining our team. We've received your application and our hiring team will review it carefully.
+Thanks for your interest in joining our team. We've received your application and our hiring team will review it carefully.
 
-We'll be in touch within the next week if we'd like to move forward with the next steps in our process.
+We'll be in touch within the next week if we'd like to move forward with next steps.
 
-Best regards"""
+Best,"""
     
-    elif recommended_action == "Ask for missing information":
-        return f"""Hello,
+    elif action == "Ask for missing information":
+        return f"""Hi {name},
 
-Thank you for your email. To better assist you, I need a bit more information.
+Thanks for your email. To better assist you, I need a bit more information.
 
 Could you please provide:
 - [Specific information needed based on email]
 
 Once I have these details, I'll be able to help you more effectively.
 
-Best regards"""
+Best,"""
     
-    elif recommended_action == "Schedule meeting":
-        return f"""Hello,
+    elif action == "Schedule meeting":
+        # Extract demo-related questions from body
+        demo_questions = []
+        body_lower = body.lower()
+        if "onboarding" in body_lower or "onboard" in body_lower:
+            demo_questions.append("onboarding")
+        if "integration" in body_lower or "integrate" in body_lower:
+            demo_questions.append("integrations")
+        if "training" in body_lower or "support" in body_lower:
+            demo_questions.append("training and support")
+        
+        questions_text = ""
+        if demo_questions:
+            questions_text = f" I can show you how Resolvely works and answer your questions about {', '.join(demo_questions)}."
+        
+        return f"""Hi {name},
 
-Thank you for reaching out. I'd be happy to schedule a call to discuss this further.
+Happy to schedule a demo!{questions_text}
 
-I'm available:
-- [Day] at [Time]
-- [Day] at [Time]
+Here are a few times that work for me next week:
+- Tuesday at 2 PM IST
+- Wednesday at 10 AM IST
+- Thursday at 4 PM IST
 
-Please let me know which time works best for you, or suggest an alternative time if these don't work.
+Which works best for you? Or suggest another time if these don't work.
 
-Best regards"""
+Best,"""
     
     else:
-        # Generic but professional response
-        return f"""Hello,
+        # Generic but professional response following brand voice
+        return f"""Hi {name},
 
-Thank you for your email regarding {subject.lower()}.
+Thanks for your email regarding {subject.lower()}.
 
 I've received your message and will review it carefully. I'll get back to you with a detailed response soon.
 
-If this is urgent, please don't hesitate to reach out.
+If this is urgent, reply to this email and I'll prioritize it.
 
-Best regards"""
+Best,"""
 
 
 def _extract_key_question(body: str) -> str:

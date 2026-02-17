@@ -30,11 +30,24 @@ async def priority_scorer_node(state: Flow1State) -> Dict:
     confidence = state.get("confidence", "Missing info")
     thread_count = state.get("thread_count", 0)
     
+    # Get SLA rules from brand context (if available)
+    sla_rules = ""
+    brand_context = state.get("brand_context")
+    if brand_context and isinstance(brand_context, dict):
+        key_points = brand_context.get("key_points", {})
+        if isinstance(key_points, dict):
+            sla_rules = key_points.get("sla_rules", "")
+    
     # Add thread context note if this is part of an ongoing conversation
     thread_note = ""
     if thread_count > 0:
         thread_note = f"\n- Thread Context: This is email #{thread_count + 1} in an ongoing conversation (thread_count={thread_count})"
         thread_note += "\n  NOTE: Ongoing conversations may warrant slightly higher priority. Add 2-5 points if this is a follow-up in an active thread."
+    
+    # Add SLA rules context if available
+    sla_context = ""
+    if sla_rules:
+        sla_context = f"\n\nCOMPANY SLA RULES (apply these when calculating priority):\n{sla_rules}\n"
     
     # Enhanced prompt with explicit calculation steps
     prompt = f"""Calculate a priority score (0-100) for this email. Use the scoring formula below and return the EXACT calculated number.
@@ -46,6 +59,7 @@ EMAIL CLASSIFICATION:
 - Impact: {impact}
 - Confidence: {confidence}
 {thread_note}
+{sla_context}
 
 SCORING FORMULA (calculate step by step):
 
