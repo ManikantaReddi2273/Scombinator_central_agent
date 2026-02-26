@@ -2,10 +2,16 @@
 Record lead-replied in CRM when an inbound email is a reply in an outbound B2B thread.
 Updates ACTIVITIES (Lead Replied), LEADS (Last_Activity_Date, Stage), and TASKS
 (mark follow-up tasks Completed, create Review lead reply task).
+
+Only B2B threads: lead_id is resolved from the thread root; the root must be an outbound
+email. Normal inbound emails and replies in non-B2B threads do not update CRM (get_lead_id
+returns None when root is not outbound).
 """
 import logging
 from datetime import datetime, timedelta
 from uuid import UUID
+
+from time_utils import today_ist_str, now_ist
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +84,7 @@ async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> 
             next_action="Review and send reply",
         )
 
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_str = today_ist_str("%Y-%m-%d")
 
         # 2. LEADS: Last_Activity_Date, Next_Followup_Date (today = follow up now), Stage = "Replied"
         try:
@@ -109,7 +115,7 @@ async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> 
             logger.warning("Could not mark tasks completed for lead reply (lead_id=%s): %s", lead_id, e)
 
         try:
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            tomorrow = (now_ist().date() + timedelta(days=1)).strftime("%Y-%m-%d")
             await crm_loader_service.create_followup_task(
                 db=db,
                 company_id=str(email.company_id),

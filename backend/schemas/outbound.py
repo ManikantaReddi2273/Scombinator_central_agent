@@ -1,7 +1,7 @@
 """
 Outbound email schemas
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -34,9 +34,24 @@ class B2BLeadResponse(BaseModel):
     Next_Followup_Date: Optional[str] = None
     Proposal_Value: Optional[str] = None
     Status: Optional[str] = None
+    Follow_Up_Count: Optional[int] = None  # 0 = none, 1 = first follow-up sent, 2 = second follow-up sent
     Objection_Notes: Optional[str] = None
     Notes: Optional[str] = None
     company_id: str  # Added for UI filtering
+
+    @field_validator("Follow_Up_Count", mode="before")
+    @classmethod
+    def coerce_follow_up_count(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v.strip())
+            except ValueError:
+                return None
+        return None
 
 
 class ActivityResponse(BaseModel):

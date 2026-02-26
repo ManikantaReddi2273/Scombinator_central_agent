@@ -23,8 +23,8 @@ services:
       # Generate using: -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object {[char]$_})
       - N8N_ENCRYPTION_KEY=LhKz4ScuRTlj1WYx8f3ECso250tOZwMm
       
-      # Timezone
-      - GENERIC_TIMEZONE=UTC
+      # Timezone (Indian Standard Time for schedules and business dates)
+      - GENERIC_TIMEZONE=Asia/Kolkata
       
       # Webhook URL (for production, use your domain)
       - WEBHOOK_URL=http://localhost:5678/

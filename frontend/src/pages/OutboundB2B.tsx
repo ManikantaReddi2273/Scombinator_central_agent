@@ -34,6 +34,10 @@ export default function OutboundB2B() {
     enabled: !!selectedCompany,
   })
 
+  const isOutreachStopped = (lead: any) =>
+    (lead?.Status || '').trim() === 'No Response – Outreach Stopped' ||
+    (lead?.Stage || '').trim() === 'No Response – Outreach Stopped'
+
   const handleSendEmail = (lead: any) => {
     setSelectedLead(lead)
     setShowCreateModal(true)
@@ -153,11 +157,18 @@ export default function OutboundB2B() {
                         className={
                           lead.Status === 'Active'
                             ? 'border-green-500 text-green-700'
-                            : 'border-gray-300 text-gray-700'
+                            : isOutreachStopped(lead)
+                              ? 'border-amber-600 text-amber-700 bg-amber-50'
+                              : 'border-gray-300 text-gray-700'
                         }
                       >
                         {lead.Status || 'Unknown'}
                       </Badge>
+                      {typeof lead.Follow_Up_Count === 'number' && lead.Follow_Up_Count > 0 && (
+                        <Badge variant="outline" className="border-slate-400 text-slate-600">
+                          Follow-up {lead.Follow_Up_Count} sent
+                        </Badge>
+                      )}
                     </div>
                     {lead.Next_Followup_Date && (
                       <p className="text-sm text-gray-600">
@@ -165,13 +176,19 @@ export default function OutboundB2B() {
                       </p>
                     )}
                   </div>
-                  <Button
-                    onClick={() => handleSendEmail(lead)}
-                    className="bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-900 shadow-md"
-                  >
-                    <Send className="w-4 h-4 mr-2" />
-                    Send Email
-                  </Button>
+                  {isOutreachStopped(lead) ? (
+                    <span className="text-sm text-amber-700 font-medium px-3 py-2 border border-amber-200 rounded-md bg-amber-50">
+                      Outreach stopped
+                    </span>
+                  ) : (
+                    <Button
+                      onClick={() => handleSendEmail(lead)}
+                      className="bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-900 shadow-md"
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      Send Email
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

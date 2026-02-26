@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import logging
 import re
 
+from time_utils import now_ist_str
+
 logger = logging.getLogger(__name__)
 
 
@@ -413,13 +415,14 @@ class CRMLoaderService:
             
             # Filter activities for this lead
             activities = []
+            lead_id_idx = self._get_lead_id_column_index(header)
             for row in rows[1:]:
                 if not row or len(row) == 0:
                     continue
-                
+                if lead_id_idx is None:
+                    continue
                 # Check if this activity belongs to the lead
-                lead_id_idx = column_map.get('Lead_ID', -1)
-                if lead_id_idx >= 0 and lead_id_idx < len(row) and row[lead_id_idx] == lead_id:
+                if lead_id_idx < len(row) and str(row[lead_id_idx]).strip() == str(lead_id).strip():
                     activity = {}
                     for col_name, col_idx in column_map.items():
                         if col_idx < len(row):
@@ -553,8 +556,8 @@ class CRMLoaderService:
             # Generate next Activity_ID
             activity_id = await self._generate_next_activity_id(db, company_id)
             
-            # Get current timestamp
-            activity_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            # Get current timestamp (app timezone, e.g. IST)
+            activity_date = now_ist_str('%Y-%m-%d %H:%M:%S')
             
             # Build row values in correct order
             new_row = []
@@ -567,7 +570,7 @@ class CRMLoaderService:
                     new_row.append(activity_type)
                 elif col_name == 'Subject_Title':
                     new_row.append(subject_title)
-                elif col_name == 'Summary':
+                elif self._is_summary_column(col_name):
                     new_row.append(summary)
                 elif col_name == 'Activity_Date':
                     new_row.append(activity_date)
@@ -637,7 +640,7 @@ class CRMLoaderService:
             if hasattr(activity_date, 'strftime'):
                 activity_date_str = activity_date.strftime('%Y-%m-%d %H:%M:%S')
             else:
-                activity_date_str = str(activity_date) if activity_date else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                activity_date_str = str(activity_date) if activity_date else now_ist_str('%Y-%m-%d %H:%M:%S')
             column_map = {col_name: idx for idx, col_name in enumerate(header)}
             new_row = []
             for col_name in header:
@@ -649,7 +652,7 @@ class CRMLoaderService:
                     new_row.append('Lead Replied')
                 elif col_name == 'Subject_Title':
                     new_row.append(subject or '')
-                elif col_name == 'Summary':
+                elif self._is_summary_column(col_name):
                     new_row.append(summary_snippet or '')
                 elif col_name == 'Activity_Date':
                     new_row.append(activity_date_str)
@@ -708,8 +711,8 @@ class CRMLoaderService:
                 raise Exception("LEADS worksheet is empty or invalid")
             
             header = rows[0]
-            column_map = {col.strip(): i for i, col in enumerate(header)}
-            lead_id_idx = column_map.get('Lead_ID') if 'Lead_ID' in column_map else column_map.get('ID')
+            column_map = {str(col).strip(): i for i, col in enumerate(header)}
+            lead_id_idx = self._get_lead_id_column_index(header)
             last_activity_idx = column_map.get('Last_Activity_Date')
             next_followup_idx = column_map.get('Next_Followup_Date')
             
@@ -776,18 +779,8 @@ class CRMLoaderService:
                 raise Exception("LEADS worksheet is empty or invalid")
             
             header = rows[0]
-            lead_id_idx = None
-            stage_idx = None
-            
-            for idx, col_name in enumerate(header):
-                cn = col_name.strip()
-                if cn in ('Lead_ID', 'ID'):
-                    if lead_id_idx is None:
-                        lead_id_idx = idx
-                elif cn == 'Stage':
-                    stage_idx = idx
-            if lead_id_idx is None:
-                lead_id_idx = next((i for i, c in enumerate(header) if c in ('Lead_ID', 'ID')), None)
+            lead_id_idx = self._get_lead_id_column_index(header)
+            stage_idx = next((i for i, c in enumerate(header) if str(c).strip() == 'Stage'), None)
             
             if lead_id_idx is None:
                 raise Exception("Lead_ID or ID column not found in LEADS worksheet")
@@ -817,29 +810,80 @@ class CRMLoaderService:
         if idx < 26:
             return chr(ord('A') + idx)
         return self._col_letter((idx // 26) - 1) + chr(ord('A') + (idx % 26))
-    
+
+    def _get_lead_id_column_index(self, header: List) -> Optional[int]:
+        """
+        Return 0-based index of Lead_ID / ID column in LEADS header.
+        Case-insensitive; accepts 'Lead_ID', 'Lead ID', 'lead_id', 'ID', 'Id'.
+        """
+        for idx, col in enumerate(header):
+            c = str(col).strip() if col is not None else ""
+            n = c.replace(" ", "_").lower()
+            if n == "lead_id":
+                return idx
+        for idx, col in enumerate(header):
+            c = str(col).strip() if col is not None else ""
+            if c.lower() == "id":
+                return idx
+        return None
+
+    @staticmethod
+    def _is_summary_column(col_name: str) -> bool:
+        """True if column is Summary (case-insensitive). Used for ACTIVITIES Summary column."""
+        return col_name is not None and str(col_name).strip().lower() == "summary"
+
     def _find_leads_row_by_lead_id(
         self, rows: List[List], header: List, lead_id: str, lead_id_idx: Optional[int] = None
     ) -> Optional[int]:
         """Find LEADS data row number (1-based, header=1) for the given lead_id. Supports Lead_ID or ID column."""
-        if lead_id_idx is not None:
-            for idx, row in enumerate(rows[1:], start=2):
-                if lead_id_idx < len(row) and str(row[lead_id_idx]).strip() == str(lead_id).strip():
-                    return idx
-            return None
-        # Resolve lead_id column: Lead_ID or ID
-        lid_idx = None
-        for i, col_name in enumerate(header):
-            if col_name in ('Lead_ID', 'ID'):
-                lid_idx = i
-                break
-        if lid_idx is None:
+        if lead_id_idx is None:
+            lead_id_idx = self._get_lead_id_column_index(header)
+        if lead_id_idx is None:
             return None
         for idx, row in enumerate(rows[1:], start=2):
-            if lid_idx < len(row) and str(row[lid_idx]).strip() == str(lead_id).strip():
+            if lead_id_idx < len(row) and str(row[lead_id_idx]).strip() == str(lead_id).strip():
                 return idx
         return None
-    
+
+    async def get_lead_follow_up_count(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        lead_id: str,
+    ) -> int:
+        """
+        Read current Follow_Up_Count for a lead from LEADS worksheet.
+        Returns 0 if column missing or value missing/non-numeric.
+        """
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                return 0
+            rows = await self.google_api.read_spreadsheet(
+                db, company_id, spreadsheet['id'], "LEADS"
+            )
+            if not rows or len(rows) < 2:
+                return 0
+            header = [str(h).strip() for h in rows[0]]
+            column_map = {col: idx for idx, col in enumerate(header)}
+            lead_id_idx = self._get_lead_id_column_index(header)
+            follow_up_idx = column_map.get('Follow_Up_Count')
+            if lead_id_idx is None or follow_up_idx is None:
+                return 0
+            for row in rows[1:]:
+                if lead_id_idx < len(row) and str(row[lead_id_idx]).strip() == str(lead_id).strip():
+                    val = row[follow_up_idx] if follow_up_idx < len(row) else None
+                    if val is None or val == "":
+                        return 0
+                    try:
+                        return int(float(str(val).strip()))
+                    except (ValueError, TypeError):
+                        return 0
+            return 0
+        except Exception as e:
+            logger.warning("Could not read Follow_Up_Count for lead %s: %s", lead_id, e)
+            return 0
+
     async def update_lead_after_send(
         self,
         db: AsyncSession,
@@ -853,10 +897,11 @@ class CRMLoaderService:
         status: str = "Active",
         objection_notes: Optional[str] = None,
         notes: Optional[str] = None,
+        follow_up_count: Optional[int] = None,
     ) -> bool:
         """
         Update LEADS row after outbound email is sent: Stage, Engagement_Level, Owner,
-        Last_Activity_Date, Next_Followup_Date, Status, Objection_Notes, Notes.
+        Last_Activity_Date, Next_Followup_Date, Status, Follow_Up_Count, Objection_Notes, Notes.
         Row is found by Lead_ID or ID. Only columns present in the sheet are updated.
         """
         try:
@@ -871,8 +916,8 @@ class CRMLoaderService:
                 raise Exception("LEADS worksheet is empty or invalid")
             
             header = rows[0]
-            column_map = {col.strip(): idx for idx, col in enumerate(header)}
-            lead_id_idx = column_map.get('Lead_ID') if 'Lead_ID' in column_map else column_map.get('ID')
+            column_map = {str(col).strip(): idx for idx, col in enumerate(header)}
+            lead_id_idx = self._get_lead_id_column_index(header)
             if lead_id_idx is None:
                 raise Exception(f"Lead_ID or ID column not found in LEADS worksheet. Columns found: {list(column_map.keys())}")
             
@@ -894,6 +939,8 @@ class CRMLoaderService:
                 updates.append(('Next_Followup_Date', next_followup_date))
             if 'Status' in column_map:
                 updates.append(('Status', status))
+            if follow_up_count is not None and 'Follow_Up_Count' in column_map:
+                updates.append(('Follow_Up_Count', str(follow_up_count)))
             if objection_notes is not None and 'Objection_Notes' in column_map:
                 updates.append(('Objection_Notes', objection_notes))
             if notes is not None and 'Notes' in column_map:
@@ -915,7 +962,53 @@ class CRMLoaderService:
         except Exception as e:
             logger.error(f"Error updating lead after send for lead {lead_id}: {str(e)}")
             raise
-    
+
+    async def update_lead_outreach_stopped(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        lead_id: str,
+    ) -> bool:
+        """
+        Set lead Status (or Stage) to "No Response – Outreach Stopped".
+        Used when Follow_Up_Count is 2 and still no reply by next follow-up date.
+        """
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                raise Exception(f"CRM workbook not found for company {company_id}")
+            rows = await self.google_api.read_spreadsheet(
+                db, company_id, spreadsheet['id'], "LEADS"
+            )
+            if not rows or len(rows) < 2:
+                raise Exception("LEADS worksheet is empty or invalid")
+            header = rows[0]
+            column_map = {str(col).strip(): idx for idx, col in enumerate(header)}
+            lead_id_idx = self._get_lead_id_column_index(header)
+            if lead_id_idx is None:
+                raise Exception(f"Lead_ID or ID column not found in LEADS worksheet. Columns found: {list(column_map.keys())}")
+            row_num = self._find_leads_row_by_lead_id(rows, header, lead_id, lead_id_idx)
+            if row_num is None:
+                raise Exception(f"Lead {lead_id} not found in LEADS worksheet")
+            stopped_value = "No Response – Outreach Stopped"
+            updates = []
+            if 'Status' in column_map:
+                updates.append(('Status', stopped_value))
+            if 'Stage' in column_map:
+                updates.append(('Stage', stopped_value))
+            for col_name, value in updates:
+                idx = column_map[col_name]
+                col_letter = self._col_letter(idx)
+                range_name = f"LEADS!{col_letter}{row_num}"
+                await self.google_api.update_spreadsheet_cell(
+                    db, company_id, spreadsheet['id'], range_name, value
+                )
+            logger.info("Marked lead %s as No Response – Outreach Stopped", lead_id)
+            return True
+        except Exception as e:
+            logger.error(f"Error marking lead outreach stopped for lead {lead_id}: {str(e)}")
+            raise
+
     async def _generate_next_task_id(
         self,
         db: AsyncSession,
@@ -1063,7 +1156,7 @@ class CRMLoaderService:
             if not rows or len(rows) < 2:
                 return 0
             header = [str(h).strip() for h in rows[0]]
-            lead_id_idx = next((i for i, c in enumerate(header) if c in ('Lead_ID', 'ID')), None)
+            lead_id_idx = self._get_lead_id_column_index(header)
             desc_idx = next((i for i, c in enumerate(header) if c == 'Description'), None)
             status_idx = next((i for i, c in enumerate(header) if c == 'Status'), None)
             if lead_id_idx is None or desc_idx is None or status_idx is None:
@@ -1090,6 +1183,71 @@ class CRMLoaderService:
             return updated
         except Exception as e:
             logger.warning("Could not mark tasks completed for lead reply (lead_id=%s): %s", lead_id, e)
+            return 0
+
+    async def mark_review_reply_tasks_completed_after_send(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        lead_id: str,
+        send_date_str: str,
+    ) -> int:
+        """
+        When we send a reply to a lead, mark "Review Reply" / "Review lead reply" tasks
+        for this lead as Completed and set Due_Date to send_date_str.
+        Matches tasks where Lead_ID = lead_id, Status = Pending, and (Task_Type or Description)
+        contains "Review Reply" or "Review lead reply".
+        Returns number of tasks updated.
+        """
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                return 0
+            rows = await self.google_api.read_spreadsheet(
+                db, company_id, spreadsheet['id'], "TASKS"
+            )
+            if not rows or len(rows) < 2:
+                return 0
+            header = [str(h).strip() for h in rows[0]]
+            lead_id_idx = self._get_lead_id_column_index(header)
+            task_type_idx = next((i for i, c in enumerate(header) if str(c).strip().lower() == 'task_type'), None)
+            desc_idx = next((i for i, c in enumerate(header) if str(c).strip() == 'Description'), None)
+            status_idx = next((i for i, c in enumerate(header) if str(c).strip() == 'Status'), None)
+            due_date_idx = next((i for i, c in enumerate(header) if str(c).strip() == 'Due_Date'), None)
+            if lead_id_idx is None or status_idx is None:
+                return 0
+            review_keywords = ("review reply", "review lead reply")
+            updated = 0
+            for row_num, row in enumerate(rows[1:], start=2):
+                if lead_id_idx >= len(row) or str(row[lead_id_idx]).strip() != str(lead_id).strip():
+                    continue
+                status = str(row[status_idx]).strip() if status_idx < len(row) else ""
+                if status.lower() != "pending":
+                    continue
+                desc = (row[desc_idx] or "").strip().lower() if desc_idx is not None and desc_idx < len(row) else ""
+                task_type = (row[task_type_idx] or "").strip().lower() if task_type_idx is not None and task_type_idx < len(row) else ""
+                combined = f"{task_type} {desc}"
+                if not any(k in combined for k in review_keywords):
+                    continue
+                # Update Status to Completed
+                col_letter = self._col_letter(status_idx)
+                range_name = f"TASKS!{col_letter}{row_num}"
+                await self.google_api.update_spreadsheet_cell(
+                    db, company_id, spreadsheet['id'], range_name, "Completed"
+                )
+                # Update Due_Date to send date
+                if due_date_idx is not None:
+                    due_col_letter = self._col_letter(due_date_idx)
+                    due_range = f"TASKS!{due_col_letter}{row_num}"
+                    await self.google_api.update_spreadsheet_cell(
+                        db, company_id, spreadsheet['id'], due_range, send_date_str
+                    )
+                updated += 1
+            if updated:
+                logger.info("Marked %s Review Reply task(s) Completed for lead %s (reply sent)", updated, lead_id)
+            return updated
+        except Exception as e:
+            logger.warning("Could not mark Review Reply tasks completed (lead_id=%s): %s", lead_id, e)
             return 0
 
 

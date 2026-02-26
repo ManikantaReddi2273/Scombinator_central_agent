@@ -72,3 +72,61 @@ async def get_lead_id_from_thread_root(
     except Exception as e:
         logger.warning("get_lead_id_from_thread_root failed: %s", e)
         return None
+
+
+async def get_thread_id_for_lead_outbound(
+    db: AsyncSession,
+    company_id: str,
+    lead_id: str,
+) -> Optional[str]:
+    """
+    Return thread_id of the most recent sent outbound email for this lead.
+    Used when creating a follow-up draft so the follow-up is in the same Gmail thread.
+
+    Args:
+        db: Database session
+        company_id: Company ID (str or UUID)
+        lead_id: Lead ID from CRM
+
+    Returns:
+        thread_id from the most recent outbound email for this lead that has thread_id set; else None
+    """
+    if not (company_id or "").strip() or not (lead_id or "").strip():
+        return None
+    try:
+        company_uuid = UUID(company_id) if isinstance(company_id, str) else company_id
+    except (ValueError, TypeError):
+        return None
+    lead_id_clean = str(lead_id).strip()
+    try:
+        result = await db.execute(
+            select(Email)
+            .where(
+                Email.company_id == company_uuid,
+                Email.email_type == "outbound",
+                Email.thread_id.isnot(None),
+            )
+            .order_by(Email.created_at.desc())
+            .limit(50)
+        )
+        emails = result.scalars().all()
+        for email in emails:
+            rc = email.recipient_context
+            if not rc:
+                continue
+            if isinstance(rc, dict):
+                lid = (rc.get("lead_id") or rc.get("Lead_ID") or "").strip()
+            elif isinstance(rc, str):
+                try:
+                    data = json.loads(rc)
+                    lid = (data.get("lead_id") or data.get("Lead_ID") or "").strip()
+                except Exception:
+                    continue
+            else:
+                continue
+            if lid == lead_id_clean:
+                return (email.thread_id or "").strip() or None
+        return None
+    except Exception as e:
+        logger.warning("get_thread_id_for_lead_outbound failed: %s", e)
+        return None

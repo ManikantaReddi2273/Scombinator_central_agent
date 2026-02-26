@@ -23,7 +23,7 @@ class Flow2Orchestrator:
     
     def __init__(self):
         self.graph = flow2_graph
-    
+
     async def _initialize_state(
         self,
         company_id: str,
@@ -32,11 +32,12 @@ class Flow2Orchestrator:
         intent: Optional[str],
         email_type: str,
         trigger_type: str,
-        brand_context: Optional[Dict] = None
+        brand_context: Optional[Dict] = None,
+        thread_id: Optional[str] = None,
     ) -> Flow2State:
         """
         Initialize Flow2State from lead data
-        
+
         Args:
             company_id: Company ID
             lead_data: Full lead record from LEADS.xlsx
@@ -45,23 +46,25 @@ class Flow2Orchestrator:
             email_type: "B2B" or "B2C"
             trigger_type: manual, time_based, calendar, task
             brand_context: Loaded brand context
-        
+            thread_id: For follow-ups, thread_id of first outbound so reply stays in same Gmail thread
+
         Returns:
             Initialized Flow2State
         """
         return Flow2State(
             # Step 1: Intent Definition (input)
             company_id=company_id,
-            lead_id=lead_data.get("Lead_ID", ""),
+            lead_id=lead_data.get("Lead_ID", lead_data.get("ID", "")),
             lead_data=lead_data,
             activities=activities,
             email_type=email_type,
             trigger_type=trigger_type,
             user_intent=intent,
-            
+            thread_id=thread_id,
+
             # Brand Context
             brand_context=brand_context,
-            
+
             # Step 2-4: Will be populated by nodes
             outbound_intent=None,
             recipient_context=None,
@@ -70,12 +73,12 @@ class Flow2Orchestrator:
             required_variables=None,
             draft_subject=None,
             draft_body=None,
-            
+
             # Status
             status="processing",
             error=None
         )
-    
+
     async def _save_to_database(
         self,
         db: AsyncSession,
@@ -100,6 +103,8 @@ class Flow2Orchestrator:
         recipient_email = state["lead_data"].get("Email", "")
         recipient_context = state.get("recipient_context", {})
         
+        # For follow-ups (time_based), use same thread as first outbound so Gmail threads correctly
+        thread_id = (state.get("thread_id") or "").strip() or None
         # Create email record
         email = Email(
             id=uuid4(),
@@ -109,7 +114,7 @@ class Flow2Orchestrator:
             body=state.get("draft_body", ""),
             from_email=company_email,
             to_email=recipient_email,
-            thread_id=None,  # Outbound emails start new threads
+            thread_id=thread_id,  # None for first outbound; set for follow-ups (same thread)
             gmail_message_id=None,  # Will be set when sent
             outbound_intent=state.get("outbound_intent"),
             recipient_context=json.dumps(recipient_context) if recipient_context else None,
@@ -172,7 +177,8 @@ class Flow2Orchestrator:
         activities: List[Dict],
         intent: Optional[str] = None,
         email_type: str = "B2B",
-        trigger_type: str = "manual"
+        trigger_type: str = "manual",
+        thread_id: Optional[str] = None,
     ) -> Dict:
         """
         Main entry point: Process outbound email through Flow 2 LangGraph workflow
@@ -210,7 +216,7 @@ class Flow2Orchestrator:
             
             company_email = company.email
             
-            # Initialize state
+            # Initialize state (include thread_id for follow-ups so draft is in same Gmail thread)
             initial_state = await self._initialize_state(
                 company_id=company_id,
                 lead_data=lead_data,
@@ -218,7 +224,8 @@ class Flow2Orchestrator:
                 intent=intent,
                 email_type=email_type,
                 trigger_type=trigger_type,
-                brand_context=brand_context
+                brand_context=brand_context,
+                thread_id=thread_id,
             )
             
             # Run LangGraph workflow

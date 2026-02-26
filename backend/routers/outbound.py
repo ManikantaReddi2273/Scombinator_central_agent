@@ -22,12 +22,14 @@ from services.token_manager import token_manager_service
 from services.crm_loader import crm_loader_service
 from services.flow2 import Flow2Orchestrator
 from services.playbook_parser import parse_followup_days_after_outreach
-from services.email_thread import get_lead_id_from_thread_root
-from auth.jwt import get_current_admin
+from services.email_thread import get_lead_id_from_thread_root, get_thread_id_for_lead_outbound
+from auth.jwt import get_current_admin, get_current_admin_or_n8n_key
 from uuid import UUID
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from googleapiclient.errors import HttpError
+
+from time_utils import now_ist, today_ist
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +271,128 @@ async def debug_crm_files(
         )
 
 
+def _parse_follow_up_count(lead: dict) -> int:
+    """Parse Follow_Up_Count from lead dict; return 0 if missing or non-numeric."""
+    v = lead.get("Follow_Up_Count")
+    if v is None or v == "":
+        return 0
+    try:
+        return int(float(str(v).strip()))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _parse_date_only(s: Optional[str]) -> Optional[date]:
+    """Parse YYYY-MM-DD from string; return None if invalid."""
+    if not s or not str(s).strip():
+        return None
+    s = str(s).strip()[:10]
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+@router.get("/b2b/leads-due-for-follow-up")
+async def get_leads_due_for_follow_up(
+    company_id: str = Query(..., description="Company ID"),
+    as_of_date: Optional[str] = Query(None, description="Date YYYY-MM-DD (default today)"),
+    db: AsyncSession = Depends(get_db),
+    _auth: Optional[Admin] = Depends(get_current_admin_or_n8n_key),
+):
+    """
+    Get leads due for follow-up draft (Follow_Up_Count 0 or 1) and leads to mark as "No Response – Outreach Stopped" (Follow_Up_Count 2).
+    Used by n8n B2B Follow-Up Drafts workflow. Auth: admin JWT or X-API-Key (N8N_SERVICE_API_KEY).
+    """
+    try:
+        company_id = clean_company_id(company_id)
+        company = await tenant_service.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        if not company.encrypted_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Company OAuth not connected",
+            )
+        target = _parse_date_only(as_of_date) or today_ist()
+        leads = await crm_loader_service.get_b2b_leads(db, company_id)
+        stopped_status = "No Response – Outreach Stopped"
+        leads_due_for_draft = []
+        leads_to_mark_stopped = []
+        for lead in leads:
+            lead_id = lead.get("Lead_ID") or lead.get("ID")
+            if not lead_id:
+                continue
+            stage = (lead.get("Stage") or "").strip()
+            status_val = (lead.get("Status") or "").strip()
+            if stage == "Replied" or status_val == stopped_status:
+                continue
+            next_followup = lead.get("Next_Followup_Date")
+            followup_d = _parse_date_only(str(next_followup) if next_followup is not None else None)
+            if followup_d is None or followup_d > target:
+                continue
+            count = _parse_follow_up_count(lead)
+            lead["company_id"] = company_id
+            lead["Follow_Up_Count"] = count
+            if count < 2:
+                leads_due_for_draft.append(lead)
+            else:
+                leads_to_mark_stopped.append(lead)
+        return {
+            "company_id": company_id,
+            "leads_due_for_draft": leads_due_for_draft,
+            "leads_to_mark_stopped": leads_to_mark_stopped,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting leads due for follow-up: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.patch("/b2b/leads/{lead_id}/mark-outreach-stopped")
+async def mark_lead_outreach_stopped(
+    lead_id: str,
+    company_id: str = Query(..., description="Company ID"),
+    db: AsyncSession = Depends(get_db),
+    _auth: Optional[Admin] = Depends(get_current_admin_or_n8n_key),
+):
+    """
+    Mark lead as "No Response – Outreach Stopped" in CRM (Status and Stage).
+    Used by n8n when Follow_Up_Count is 2 and still no reply by next follow-up date.
+    Auth: admin JWT or X-API-Key (N8N_SERVICE_API_KEY).
+    """
+    try:
+        company_id = clean_company_id(company_id)
+        company = await tenant_service.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        if not company.encrypted_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Company OAuth not connected",
+            )
+        await crm_loader_service.update_lead_outreach_stopped(
+            db=db, company_id=company_id, lead_id=lead_id.strip()
+        )
+        return {
+            "status": "success",
+            "message": "Lead marked as No Response – Outreach Stopped",
+            "lead_id": lead_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking lead outreach stopped: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
 @router.get("/b2b/leads/{lead_id}/activities", response_model=List[ActivityResponse])
 async def get_lead_activities(
     lead_id: str,
@@ -320,7 +444,7 @@ async def get_lead_activities(
 async def create_outbound_email(
     request: OutboundCreateRequest,
     db: AsyncSession = Depends(get_db),
-    admin: Admin = Depends(get_current_admin)
+    _auth: Optional[Admin] = Depends(get_current_admin_or_n8n_key),
 ):
     """
     Create outbound email draft for a B2B lead
@@ -367,6 +491,17 @@ async def create_outbound_email(
             db, request.company_id, request.lead_id
         )
         
+        # For follow-ups (time_based), resolve thread_id of first outbound so the new draft is in the same Gmail thread
+        thread_id = None
+        if (request.trigger_type or "").strip().lower() == "time_based":
+            thread_id = await get_thread_id_for_lead_outbound(
+                db, request.company_id, request.lead_id
+            )
+            if thread_id:
+                logger.info(f"Follow-up draft will use thread_id={thread_id} for lead {request.lead_id}")
+            else:
+                logger.warning(f"No thread_id found for lead {request.lead_id}; follow-up draft may start a new thread")
+        
         # Initialize Flow 2 Orchestrator
         orchestrator = Flow2Orchestrator()
         
@@ -378,7 +513,8 @@ async def create_outbound_email(
             activities=activities,
             intent=request.intent,
             email_type=request.email_type,
-            trigger_type=request.trigger_type
+            trigger_type=request.trigger_type,
+            thread_id=thread_id,
         )
         
         if result.get("status") == "error":
@@ -416,6 +552,8 @@ async def update_crm_after_send(
 ):
     """
     Update CRM sheets after email is sent (LEADS, ACTIVITIES, TASKS — all linked by lead_id).
+    Only for B2B outbound emails or our replies in a B2B thread (lead_id required). Normal
+    inbound threads and their replies must not call this; n8n gates with "Is Outbound B2B?".
     No auth required — n8n calls this directly (same as /api/drafts/{id}/sent).
     
     1. Logs email activity to ACTIVITIES (linked to lead_id).
@@ -473,8 +611,8 @@ async def update_crm_after_send(
         
         company_id = str(email.company_id)
         
-        # Next follow-up date: from request, or from company PLAYBOOKS.md (e.g. 3 days after send)
-        sent_date = datetime.now()
+        # Next follow-up date: from request, or from company PLAYBOOKS.md (e.g. 3 days after send). Use app timezone (e.g. IST).
+        sent_date = now_ist()
         today_str = sent_date.strftime('%Y-%m-%d')
         next_followup_date = update_data.next_followup_date
         if not next_followup_date:
@@ -485,17 +623,32 @@ async def update_crm_after_send(
                 if brand_context and isinstance(brand_context.get("full"), dict):
                     playbooks_content = brand_context["full"].get("playbooks")
                 followup_days = parse_followup_days_after_outreach(playbooks_content)
-                next_date = sent_date + timedelta(days=followup_days)
+                next_date = sent_date.date() + timedelta(days=followup_days)
                 next_followup_date = next_date.strftime('%Y-%m-%d')
             except Exception as e:
                 logger.warning(f"Could not load playbook for follow-up days: {e}; using 3 days")
-                next_date = sent_date + timedelta(days=3)
+                next_date = sent_date.date() + timedelta(days=3)
                 next_followup_date = next_date.strftime('%Y-%m-%d')
         
+        # Detect follow-up send (time_based trigger from scheduled follow-up workflow)
+        is_follow_up = (getattr(email, "trigger_type", None) or "").strip().lower() == "time_based"
+        follow_up_count_for_lead = None
+        stage_for_lead = update_data.stage or "Email Sent"
+        if is_follow_up:
+            current_count = await crm_loader_service.get_lead_follow_up_count(
+                db=db, company_id=company_id, lead_id=lead_id
+            )
+            new_count = current_count + 1
+            follow_up_count_for_lead = new_count
+            if not update_data.stage:
+                stage_for_lead = f"Follow-up {new_count} Sent" if new_count in (1, 2) else "Email Sent"
+
         if update_data.activity_summary:
             activity_summary = update_data.activity_summary
         elif resolved_lead_from_thread or (not is_outbound and lead_id):
             activity_summary = f"Replied to lead: {email.subject}"
+        elif is_follow_up and follow_up_count_for_lead:
+            activity_summary = f"Follow-up {follow_up_count_for_lead}: {email.subject}"
         else:
             activity_summary = f"Sent email: {email.subject}"
 
@@ -513,19 +666,20 @@ async def update_crm_after_send(
             followup_date=next_followup_date
         )
         
-        # 2. Update LEADS: Stage, Engagement_Level, Owner, Last_Activity_Date, Next_Followup_Date, Status, Objection_Notes, Notes
+        # 2. Update LEADS: Stage, Engagement_Level, Owner, Last_Activity_Date, Next_Followup_Date, Status, Follow_Up_Count, Objection_Notes, Notes
         await crm_loader_service.update_lead_after_send(
             db=db,
             company_id=company_id,
             lead_id=lead_id,
             last_activity_date=today_str,
             next_followup_date=next_followup_date,
-            stage=update_data.stage or "Email Sent",
+            stage=stage_for_lead,
             engagement_level=update_data.engagement_level or "Medium",
             owner=update_data.owner or company_name,
             status=update_data.status or "Active",
             objection_notes=update_data.objection_notes,
             notes=update_data.notes,
+            follow_up_count=follow_up_count_for_lead,
         )
         
         # 3. Create follow-up task in TASKS (linked to lead_id)
@@ -539,6 +693,18 @@ async def update_crm_after_send(
             priority="High",
             assigned_to=company_name
         )
+        
+        # 4. When we sent a reply to the lead, mark "Review Reply" tasks as Completed and set Due_Date to today
+        if resolved_lead_from_thread or (not is_outbound and lead_id):
+            try:
+                await crm_loader_service.mark_review_reply_tasks_completed_after_send(
+                    db=db,
+                    company_id=company_id,
+                    lead_id=lead_id,
+                    send_date_str=today_str,
+                )
+            except Exception as e:
+                logger.warning("Could not mark Review Reply tasks completed for lead %s: %s", lead_id, e)
         
         logger.info(f"Updated CRM for lead {lead_id} after sending email (LEADS, ACTIVITIES, TASKS)")
         

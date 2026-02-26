@@ -103,6 +103,8 @@ The **Update CRM After Send** workflow node needs an API key to call the backend
 
 If `N8N_SERVICE_API_KEY` is not set in n8n’s env, the container will start with a placeholder and the **Update CRM After Send** node will get 403 until you set it and restart.
 
+**B2B Follow-Up Drafts:** The same key is used for “Get Leads Due for Follow-Up”, “Mark Lead Outreach Stopped”, and “Create Draft” nodes. The workflow sends the key as both `X-API-Key` header and `api_key` query parameter so auth works even if `$env` is not available in headers. If you see **403 Not authenticated**, ensure `n8n/.env` has `N8N_SERVICE_API_KEY` (same value as `backend/.env`), that `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is set in `docker-compose.yml`, and restart n8n (`docker-compose down` then `docker-compose up -d`).
+
 ## Important Notes
 
 1. **Encryption Key**: Never lose this key! You need it to access encrypted credentials.

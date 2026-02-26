@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o"  # Use GPT-4o for best quality, can override in .env
     
+    # Business timezone for CRM dates (LEADS, ACTIVITIES, TASKS). DB remains UTC.
+    APP_TIMEZONE: str = "Asia/Kolkata"
+
     # n8n
     N8N_WEBHOOK_URL: str = "http://localhost:5678/webhook"
     # Optional: API key for n8n / service calls (e.g. Update CRM). If set, requests with X-API-Key: <value> are accepted.

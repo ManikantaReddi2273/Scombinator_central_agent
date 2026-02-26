@@ -25,6 +25,7 @@ class Flow2State(TypedDict):
     email_type: str  # "B2B" or "B2C"
     trigger_type: str  # manual, time_based, calendar, task
     user_intent: Optional[str]  # Intent provided by user (if manual trigger)
+    thread_id: Optional[str]  # For follow-ups: same thread as first outbound (so Gmail threads correctly)
     
     # Brand Context (loaded once before graph execution)
     brand_context: Optional[Dict]

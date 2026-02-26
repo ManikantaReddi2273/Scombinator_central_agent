@@ -1,2 +1,2 @@
-Lead_ID,Institution_Name,Contact_Name,Role,Email,Phone,City,Source,Segment,Stage,Engagement_Level,Owner,Date_Met,Last_Activity_Date,Next_Followup_Date,Proposal_Value,Status,Objection_Notes,Notes
-B2B-001,Greenfield International School,Mr. Ramesh Kumar,Principal,principal@greenfield.edu,+91-9876543210,Hyderabad,EduTech Expo 2026,CBSE / 1500+ students,Details Sent,High,Sujith,2026-02-15,2026-02-18,2026-02-21,250000,Active,Budget approval pending,Interested in pilot program
+Lead_ID,Institution_Name,Contact_Name,Role,Email,Phone,City,Source,Segment,Stage,Engagement_Level,Owner,Date_Met,Last_Activity_Date,Next_Followup_Date,Proposal_Value,Status,Follow_Up_Count,Objection_Notes,Notes
+B2B-001,Greenfield International School,Mr. Ramesh Kumar,Principal,principal@greenfield.edu,+91-9876543210,Hyderabad,EduTech Expo 2026,CBSE / 1500+ students,Details Sent,High,Sujith,2026-02-15,2026-02-18,2026-02-21,250000,Active,0,Budget approval pending,Interested in pilot program
