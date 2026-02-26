@@ -1,8 +1,13 @@
 """
 Configuration settings for S Combinator Central Agent Platform
 """
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import Optional
+
+# Load .env from backend directory so it works regardless of CWD
+_BACKEND_DIR = Path(__file__).resolve().parent
+_ENV_FILE = _BACKEND_DIR / ".env"
 
 
 class Settings(BaseSettings):
@@ -41,6 +46,8 @@ class Settings(BaseSettings):
     
     # n8n
     N8N_WEBHOOK_URL: str = "http://localhost:5678/webhook"
+    # Optional: API key for n8n / service calls (e.g. Update CRM). If set, requests with X-API-Key: <value> are accepted.
+    N8N_SERVICE_API_KEY: Optional[str] = None
     
     # Redis
     REDIS_HOST: str = "localhost"
@@ -49,7 +56,7 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     
     class Config:
-        env_file = ".env"  # Read from .env file only
+        env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
         case_sensitive = True
         extra = "ignore"  # Ignore extra fields in .env file
 

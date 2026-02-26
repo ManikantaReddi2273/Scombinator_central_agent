@@ -7,7 +7,8 @@ from sqlalchemy import select, desc
 from database import get_db
 from models.admin import Admin
 from models.draft import Draft
-from schemas.draft import DraftResponse, DraftStatusResponse, DraftApproveRequest
+from models.email import Email
+from schemas.draft import DraftResponse, DraftStatusResponse, DraftApproveRequest, DraftSentRequest
 from services.audit_logger import audit_logger_service
 from auth.jwt import get_current_admin
 from datetime import datetime
@@ -363,11 +364,13 @@ async def reject_draft(
 @router.post("/{draft_id}/sent")
 async def mark_draft_sent(
     draft_id: str,
+    body: Optional[DraftSentRequest] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Mark draft as sent (called by n8n after successfully sending email)
-    No auth required - n8n calls this directly
+    Mark draft as sent (called by n8n after successfully sending email).
+    Optional body: thread_id, gmail_message_id — persist on email for threading (e.g. outbound first send).
+    No auth required - n8n calls this directly.
     """
     result = await db.execute(
         select(Draft).where(Draft.id == uuid.UUID(draft_id))
@@ -380,14 +383,24 @@ async def mark_draft_sent(
             detail="Draft not found"
         )
     
-    # Update draft status
     draft.status = "sent"
     draft.sent_at = datetime.utcnow()
+    
+    # Persist thread_id / gmail_message_id on email when provided (n8n sends after Gmail API)
+    if body and (body.thread_id or body.gmail_message_id):
+        email_result = await db.execute(
+            select(Email).where(Email.id == draft.email_id)
+        )
+        email = email_result.scalar_one_or_none()
+        if email:
+            if body.thread_id:
+                email.thread_id = body.thread_id.strip()
+            if body.gmail_message_id:
+                email.gmail_message_id = body.gmail_message_id.strip()
     
     await db.commit()
     await db.refresh(draft)
     
-    # Log in audit_logs
     await audit_logger_service.log(
         db=db,
         action_type="draft_sent",

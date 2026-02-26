@@ -1,0 +1,2 @@
+Task_ID,Lead_ID,Task_Type,Description,Due_Date,Priority,Status,Assigned_To
+TASK-0001,B2B-001,Follow-up Email,Send Follow-up #2,2026-02-21,High,Pending,Sujith

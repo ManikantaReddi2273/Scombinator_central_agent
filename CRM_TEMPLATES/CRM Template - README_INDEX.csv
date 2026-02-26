@@ -1,0 +1,17 @@
+Field,Value
+CRM Version,v1.0
+Owner,S Combinator
+Last Updated,2026-02-18
+Purpose,Central B2B & B2C Outbound Tracking System
+,
+TAB NAME,PURPOSE
+LEADS,Master record of all leads
+ACTIVITIES,"Log of all emails, meetings, calls"
+TASKS,Pending follow-ups and reminders
+DOCUMENT_TRACKING,"Track brochures, proposals, contracts"
+,
+RULES,
+1,Every new lead MUST have unique Lead ID
+2,Every email or call MUST be logged in ACTIVITIES
+3,Stage must always reflect current deal status
+4,Always update Last Activity Date

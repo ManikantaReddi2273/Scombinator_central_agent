@@ -42,6 +42,14 @@ class Email(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
+    # Outbound email fields
+    email_type = Column(String(20), nullable=True, default="inbound", index=True)  # "inbound" or "outbound"
+    outbound_intent = Column(String(100), nullable=True)  # followup_checkin, schedule_meeting, send_proposal, address_objection
+    outbound_sequence_step = Column(String(10), nullable=True)  # For B2C sequences (B2B uses null)
+    recipient_context = Column(JSON, nullable=True)  # Stores lead/recipient data from CRM
+    scheduled_send_at = Column(DateTime(timezone=True), nullable=True)  # For scheduled emails
+    trigger_type = Column(String(50), nullable=True)  # manual, time_based, calendar, task
+    
     # Relationships
     company = relationship("Company", back_populates="emails")
     drafts = relationship("Draft", back_populates="email", cascade="all, delete-orphan")

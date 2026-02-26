@@ -7,6 +7,7 @@ import Drafts from './pages/Drafts'
 import Companies from './pages/Companies'
 import Emails from './pages/Emails'
 import Dashboard from './pages/Dashboard'
+import OutboundB2B from './pages/OutboundB2B'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
@@ -30,6 +31,7 @@ function App() {
         <Route path="drafts" element={<Drafts />} />
         <Route path="emails" element={<Emails />} />
         <Route path="companies" element={<Companies />} />
+        <Route path="outbound/b2b" element={<OutboundB2B />} />
       </Route>
     </Routes>
   )

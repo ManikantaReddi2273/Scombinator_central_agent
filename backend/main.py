@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from config import settings
-from routers import auth, companies, emails, drafts, dashboard
+from routers import auth, companies, emails, drafts, dashboard, outbound
 import traceback
 
 app = FastAPI(
@@ -101,12 +101,23 @@ async def options_handler(request: Request, full_path: str):
         }
     )
 
+# Startup: log whether n8n API key is configured (for Update CRM auth)
+@app.on_event("startup")
+async def startup_event():
+    import logging
+    logger = logging.getLogger(__name__)
+    if settings.N8N_SERVICE_API_KEY:
+        logger.info("N8N_SERVICE_API_KEY is set (Update CRM / n8n auth enabled)")
+    else:
+        logger.warning("N8N_SERVICE_API_KEY is not set; Update CRM endpoint will require Bearer JWT")
+
 # Include routers
 app.include_router(auth.router)
 app.include_router(companies.router)
 app.include_router(emails.router)
 app.include_router(drafts.router)
 app.include_router(dashboard.router)
+app.include_router(outbound.router)
 
 
 @app.get("/")

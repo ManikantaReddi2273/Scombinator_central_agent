@@ -76,6 +76,33 @@ n8n/
 └── README.md            # This file
 ```
 
+## Update CRM After Send (API key)
+
+The **Update CRM After Send** workflow node needs an API key to call the backend. Env access is allowed so the node can read `$env.N8N_SERVICE_API_KEY`.
+
+**What you need to do:**
+
+1. **Backend** – In `backend/.env`, add (use a long random string, e.g. 32+ chars):
+   ```env
+   N8N_SERVICE_API_KEY=your-secret-key-here
+   ```
+   Restart the backend after changing `.env`.
+
+2. **n8n** – In the **n8n** folder, create a file named `.env` (copy from `.env.example` if needed) and set the **same** value:
+   ```env
+   N8N_SERVICE_API_KEY=your-secret-key-here
+   ```
+   Use the exact same value as in `backend/.env`.
+
+3. **Restart n8n** so it picks up the new env:
+   ```powershell
+   cd n8n
+   docker-compose down
+   docker-compose up -d
+   ```
+
+If `N8N_SERVICE_API_KEY` is not set in n8n’s env, the container will start with a placeholder and the **Update CRM After Send** node will get 403 until you set it and restart.
+
 ## Important Notes
 
 1. **Encryption Key**: Never lose this key! You need it to access encrypted credentials.

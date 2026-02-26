@@ -1,17 +1,28 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { draftsAPI } from '../lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils'
 import { Check, X, Eye, Edit, Building2, Mail } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import EmailDetail from '../components/EmailDetail'
 
 export default function Drafts() {
-  const [selectedDraft, setSelectedDraft] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const draftIdFromUrl = searchParams.get('draft')
+  const [selectedDraft, setSelectedDraft] = useState<string | null>(draftIdFromUrl || null)
   const [editedBody, setEditedBody] = useState('')
   const queryClient = useQueryClient()
+
+  // Open draft from URL (e.g. after "Create Draft" from B2B Outbound)
+  useEffect(() => {
+    if (draftIdFromUrl) {
+      setSelectedDraft(draftIdFromUrl)
+      setSearchParams({}, { replace: true })
+    }
+  }, [draftIdFromUrl, setSearchParams])
 
   const { data: drafts, isLoading } = useQuery({
     queryKey: ['drafts'],
@@ -45,6 +56,11 @@ export default function Drafts() {
   const pendingDrafts = drafts?.filter((d: any) => d.status === 'pending') || []
   const approvedDrafts = drafts?.filter((d: any) => d.status === 'approved') || []
   const [showEmailDetail, setShowEmailDetail] = useState(false)
+
+  // Sync edited body when selected draft (or its data) changes
+  useEffect(() => {
+    if (selectedDraftData?.body != null) setEditedBody(selectedDraftData.body)
+  }, [selectedDraft, selectedDraftData?.body])
 
   return (
     <div className="space-y-6">

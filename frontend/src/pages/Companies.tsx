@@ -35,10 +35,12 @@ export default function Companies() {
     
     // Build Google OAuth URL with company_id in state
     // gmail.modify includes read, send, and modify (mark as read) permissions
+    // sheets includes read/write access to Google Sheets
     const scopes = [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/drive.file'
+      'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/spreadsheets'  // Google Sheets API access
     ].join(' ')
     
     const googleOAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -50,7 +52,12 @@ export default function Companies() {
       `access_type=offline&` +
       `prompt=consent`
     
-    console.log('  - Full OAuth URL:', googleOAuthUrl.substring(0, 200) + '...')
+    // Debug: Log full OAuth URL and scopes
+    console.log('🔍 OAuth Scopes Debug:')
+    console.log('  - Scopes array:', scopes.split(' '))
+    console.log('  - Has spreadsheets scope:', scopes.includes('spreadsheets'))
+    console.log('  - Full OAuth URL:', googleOAuthUrl)
+    console.log('  - Decoded scope param:', decodeURIComponent(googleOAuthUrl.split('scope=')[1]?.split('&')[0] || ''))
     
     // Redirect to Google OAuth
     window.location.href = googleOAuthUrl

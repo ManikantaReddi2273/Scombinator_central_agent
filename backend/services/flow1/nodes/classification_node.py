@@ -32,13 +32,16 @@ async def classification_node(state: Flow1State) -> Dict:
     thread_history = state.get("thread_history", [])  # Always a list
     thread_count = state.get("thread_count", 0)  # Always an int
     
-    # Get company name from brand context (if available)
+    # Get company name from brand context (loaded from Redis cache via orchestrator)
     company_name = "Company"
     brand_context = state.get("brand_context")
     if brand_context and isinstance(brand_context, dict):
         key_points = brand_context.get("key_points", {})
         if isinstance(key_points, dict):
             company_name = key_points.get("company_name", "Company")
+            logger.info(f"Using brand context company_name: {company_name}")
+    else:
+        logger.warning("Brand context not available in state - using default company name")
     
     # Truncate body to 2000 chars to avoid token limits
     body_truncated = body[:2000] if len(body) > 2000 else body
@@ -56,109 +59,114 @@ async def classification_node(state: Flow1State) -> Dict:
         
         thread_context += "\nNOTE: This appears to be a follow-up email. Consider the conversation context when classifying. If this continues a previous discussion, mark intent as 'Follow-up'."
     
-    # Enhanced prompt with detailed examples and clear instructions
-    prompt = f"""You are an expert business email classifier. Analyze this email CAREFULLY and classify it across 5 dimensions. Read the ENTIRE email, not just the subject.
-
-COMPANY CONTEXT:
-Company: {company_name}
+    # Enhanced prompt with few-shot examples aligned with architecture
+    prompt = f"""You are an expert business email classifier for {company_name}. Analyze this email across 5 dimensions. Read the ENTIRE email body, not just the subject.
 
 EMAIL TO CLASSIFY:
 Subject: {subject}
 Body: {body_truncated}
 {thread_context}
 
-CRITICAL: Read the FULL email body to understand the actual purpose. Don't just look at keywords - understand the business context.
-
 CLASSIFICATION DIMENSIONS:
 
-1. FUNCTION (choose ONE - THIS IS CRITICAL):
-   - Sales: Questions about products/services, pricing, purchasing, demos, sales opportunities, quotes, proposals
-     * KEYWORDS: "pricing", "price", "cost", "quote", "purchase", "buy", "interested in", "demo", "trial", "enterprise", "subscription"
-     * If email mentions pricing, cost, or purchasing → ALWAYS choose Sales, NOT Admin
-   - Hiring: Job applications, resumes, recruitment inquiries, candidate communications, talent acquisition, interview requests
-   - Support: Technical issues, bug reports, help requests, troubleshooting, account problems, feature questions
-   - Legal: Contracts, agreements, compliance questions, legal matters, terms and conditions, liability, disputes
-   - Ops: Operations, logistics, shipping, fulfillment, supply chain, delivery, inventory, order status
-   - Marketing: Promotions, campaigns, partnerships, events, newsletters, content requests, PR inquiries
-   - Admin: General administrative tasks, billing, account management, internal communications
-     * ONLY use Admin if it's clearly NOT Sales, Hiring, Support, Legal, Ops, or Marketing
-     * If email is about pricing/purchasing → Sales, NOT Admin
-     * If email is about a job/application → Hiring, NOT Admin
-     * Admin is the LAST resort, not the default
+1. FUNCTION (choose ONE):
+   - Sales: Products/services, pricing, purchasing, demos, quotes, proposals
+   - Hiring: Job applications, resumes, recruitment, candidate communications
+   - Support: Technical issues, bug reports, help requests, troubleshooting
+   - Legal: Contracts, compliance, legal matters, terms, disputes
+   - Ops: Operations, logistics, shipping, fulfillment, delivery, order status
+   - Marketing: Promotions, campaigns, partnerships, events, newsletters
+   - Admin: General admin tasks, billing, account management (LAST RESORT)
 
 2. INTENT (choose ONE):
-   - Inquiry: Initial question, information request, seeking details, asking "how", "what", "when", "where"
-   - Follow-up: Following up on previous email/conversation, checking status, "did you see my email", "any update"
-   - Objection: Concerns, hesitations, objections, pushback, "too expensive", "not interested", "we use competitor"
-   - Scheduling: Requesting meetings, calls, appointments, calendar coordination, "can we schedule", "when are you available"
-   - Application: Job application submission, resume attached, "I'm applying for", "interested in position"
-   - FAQ: Frequently asked question, common query, standard information request, "how do I", "what is"
-   - Complaint: Unhappy customer, dissatisfaction, issue escalation, "disappointed", "not working", "poor service"
+   - Inquiry: Initial question, information request
+   - Follow-up: Following up on previous conversation, checking status
+   - Objection: Concerns, hesitations, pushback
+   - Scheduling: Requesting meetings, calls, appointments
+   - Application: Job application submission, resume attached
+   - FAQ: Frequently asked question, common query
+   - Complaint: Unhappy customer, dissatisfaction, issue escalation
 
 3. URGENCY (choose ONE):
-   - Immediate: Words like "urgent", "ASAP", "emergency", "critical", "deadline today/tomorrow", "need help now"
-   - Soon: Time-sensitive but not emergency, "this week", "by Friday", "need response soon", "time-sensitive"
-   - Can wait: Standard response time acceptable, no deadline mentioned, routine inquiry, "when you have time"
+   - Immediate: "urgent", "ASAP", "emergency", "critical", "deadline today"
+   - Soon: "this week", "by Friday", "need response soon", time-sensitive
+   - Can wait: Standard response time, no deadline, routine inquiry
 
 4. IMPACT (choose ONE):
-   - Revenue: Direct sales impact, potential deals, pricing inquiries, enterprise customers, "interested in purchasing"
-   - Hiring: Talent acquisition, critical role filling, senior positions, "we need to hire", recruitment priority
-   - Brand: Reputation risk, customer satisfaction, public relations, complaints, negative feedback, "unhappy customer"
-   - Low: Minimal business impact, routine communication, informational, general questions, no clear business value
+   - Revenue: Direct sales impact, potential deals, pricing inquiries
+   - Hiring: Talent acquisition, critical role filling, senior positions
+   - Brand: Reputation risk, customer satisfaction, complaints
+   - Low: Minimal business impact, routine communication
 
 5. CONFIDENCE (choose ONE):
-   - Clear: Email clearly indicates function and intent, all information present, unambiguous purpose
-   - Ambiguous: Some uncertainty, mixed signals, could be multiple categories, needs interpretation
-   - Missing info: Insufficient information, very short email, unclear purpose, needs clarification
+   - Clear: Email clearly indicates function and intent
+   - Ambiguous: Some uncertainty, mixed signals
+   - Missing info: Insufficient information, very short email
 
-CLASSIFICATION RULES (FOLLOW THESE STRICTLY):
-1. Read the ENTIRE email body, not just the subject line
-2. Identify the PRIMARY purpose: What does the sender want?
-3. Look for business signals:
-   - "pricing", "quote", "cost", "purchase", "buy", "interested in" → Sales
-   - "resume", "application", "job", "position", "hiring" → Hiring
-   - "problem", "issue", "not working", "error", "help" → Support
-   - "contract", "legal", "compliance", "terms" → Legal
-   - "shipment", "delivery", "order", "logistics" → Ops
-   - "partnership", "event", "promotion", "marketing" → Marketing
-4. Assess urgency: Look for "urgent", "ASAP", "deadline", "soon", time constraints
-5. Assess impact: Revenue (sales opportunity), Hiring (talent need), Brand (reputation risk), Low (routine)
-6. Be honest about confidence: Clear = obvious purpose, Ambiguous = could be multiple things, Missing info = too vague
-
-REAL EXAMPLES (learn from these):
+FEW-SHOT EXAMPLES (follow this exact format):
 
 Example 1:
+Input:
 Subject: "Enterprise Pricing Inquiry"
 Body: "Hi, I'm reaching out on behalf of TechCorp. We're interested in your platform for 50+ employees. Could you provide pricing details?"
-→ Sales, Inquiry, Soon, Revenue, Clear
-(Why: Customer wants pricing = Sales, asking for info = Inquiry, business opportunity = Revenue)
+Output: {{"function": "Sales", "intent": "Inquiry", "urgency": "Soon", "impact": "Revenue", "confidence": "Clear"}}
+Reasoning: Customer wants pricing = Sales, asking for info = Inquiry, business opportunity = Revenue impact
 
 Example 2:
+Input:
 Subject: "Application for Senior Developer"
-Body: "I've attached my resume for the position. I have 8 years of experience..."
-→ Hiring, Application, Can wait, Hiring, Clear
-(Why: Job application = Hiring + Application, not urgent = Can wait, hiring need = Hiring impact)
+Body: "I've attached my resume for the position. I have 8 years of experience in Python and React."
+Output: {{"function": "Hiring", "intent": "Application", "urgency": "Can wait", "impact": "Hiring", "confidence": "Clear"}}
+Reasoning: Job application = Hiring + Application, not urgent = Can wait, hiring need = Hiring impact
 
 Example 3:
+Input:
 Subject: "URGENT - System Down"
 Body: "Our customers can't login. This is critical. Need help immediately!"
-→ Support, Complaint, Immediate, Brand, Clear
-(Why: Technical issue = Support, problem = Complaint, urgent language = Immediate, reputation risk = Brand)
+Output: {{"function": "Support", "intent": "Complaint", "urgency": "Immediate", "impact": "Brand", "confidence": "Clear"}}
+Reasoning: Technical issue = Support, problem = Complaint, urgent language = Immediate, reputation risk = Brand
 
 Example 4:
+Input:
 Subject: "Re: Product Demo"
-Body: "Just following up on my email from last week about scheduling a demo."
-→ Sales, Follow-up, Soon, Revenue, Clear
-(Why: Sales context = Sales, following up = Follow-up, sales opportunity = Revenue)
+Body: "Just following up on my email from last week about scheduling a demo. Any update?"
+Output: {{"function": "Sales", "intent": "Follow-up", "urgency": "Soon", "impact": "Revenue", "confidence": "Clear"}}
+Reasoning: Sales context = Sales, following up = Follow-up, sales opportunity = Revenue
 
 Example 5:
+Input:
 Subject: "Question about your service"
 Body: "What are your business hours and support availability?"
-→ Support, FAQ, Can wait, Low, Clear
-(Why: Support question = Support, common question = FAQ, routine = Low impact)
+Output: {{"function": "Support", "intent": "FAQ", "urgency": "Can wait", "impact": "Low", "confidence": "Clear"}}
+Reasoning: Support question = Support, common question = FAQ, routine = Low impact
+
+Example 6:
+Input:
+Subject: "Contract Review Needed"
+Body: "We need to review the data processing agreement before signing. Can you clarify section 3.2?"
+Output: {{"function": "Legal", "intent": "Inquiry", "urgency": "Soon", "impact": "Low", "confidence": "Clear"}}
+Reasoning: Contract/agreement = Legal, asking for clarification = Inquiry, legal matter = Low impact (not revenue)
+
+Example 7:
+Input:
+Subject: "Order #12345 Status"
+Body: "Hi, can you check the status of my order? It was supposed to arrive yesterday."
+Output: {{"function": "Ops", "intent": "Inquiry", "urgency": "Soon", "impact": "Brand", "confidence": "Clear"}}
+Reasoning: Order status = Ops, asking for info = Inquiry, delivery issue = Brand impact (customer satisfaction)
+
+Example 8:
+Input:
+Subject: "Too expensive"
+Body: "Your pricing is too high compared to competitors. We're looking elsewhere."
+Output: {{"function": "Sales", "intent": "Objection", "urgency": "Soon", "impact": "Revenue", "confidence": "Clear"}}
+Reasoning: Pricing concern = Sales, objection = Objection, sales risk = Revenue impact
+
+NOW CLASSIFY THIS EMAIL:
+Subject: {subject}
+Body: {body_truncated}
 
 Return ONLY a JSON object with these exact keys:
-{{"function": "Sales", "intent": "Inquiry", "urgency": "Soon", "impact": "Revenue", "confidence": "Clear"}}"""
+{{"function": "...", "intent": "...", "urgency": "...", "impact": "...", "confidence": "..."}}"""
 
     messages = [
         {

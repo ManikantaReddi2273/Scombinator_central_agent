@@ -1,0 +1,26 @@
+S Combinator CRM — KPI Dashboard,,,,
+,,,,
+As of (Today),2026-02-18,,B2B — Leads by Stage,
+,,,,
+B2B — Core Metrics,,,Stage,Count
+Active Leads,1,,Met,0
+Demos Scheduled,0,,Details Sent,1
+Proposals Sent,0,,Follow-up 1,0
+Closed Won,0,,Follow-up 2,0
+Closed Lost,0,,Follow-up 3,0
+,,,Demo Scheduled,0
+Tasks — Follow-up Health,,,Demo Done,0
+Tasks Pending,1,,Proposal Sent,0
+Tasks Due Today,0,,Negotiation,0
+Tasks Due Next 7 Days,0,,Closed Won,0
+,,,Closed Lost,0
+,,,,
+B2C — Funnel Metrics,,,B2C — Leads by Funnel Stage,
+Total B2C Leads,1,,Funnel Stage,Count
+B2C Engaged,1,,New Lead,0
+B2C Demo Booked,1,,Engaged,1
+B2C Converted,0,,Demo Booked,0
+,,,Demo Done,0
+,,,Converted,0
+,,,Churned,0
+,,,Unsubscribed,0

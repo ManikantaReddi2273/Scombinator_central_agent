@@ -78,8 +78,9 @@ async def connect_oauth(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Connect OAuth tokens to an existing company (Step 2)
+    Connect or update OAuth tokens for an existing company (Step 2)
     This endpoint is called by n8n after OAuth flow completes.
+    Can be used to connect new tokens or update existing ones (e.g., to add new scopes).
     No admin auth required - n8n calls this directly.
     """
     # Check if company exists
@@ -90,14 +91,12 @@ async def connect_oauth(
             detail=f"Company with id {company_id} not found"
         )
     
-    # Check if OAuth already connected
-    if company.encrypted_access_token is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Company {company_id} already has OAuth tokens connected. Use update endpoint to refresh tokens."
-        )
+    # Allow updating existing tokens (for re-authentication with new scopes)
+    is_update = company.encrypted_access_token is not None
+    if is_update:
+        logger.info(f"Updating OAuth tokens for company {company_id} (re-authentication)")
     
-    # Connect OAuth tokens
+    # Connect or update OAuth tokens
     try:
         company = await tenant_service.connect_oauth_to_company(
             db=db,
@@ -362,6 +361,72 @@ async def get_gmail_token(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_detail
+        )
+
+
+@router.get("/{company_id}/oauth-scopes")
+async def check_oauth_scopes(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """
+    Check what OAuth scopes are available for a company's tokens
+    Useful for debugging scope issues
+    """
+    from services.token_manager import token_manager_service
+    import httpx
+    
+    try:
+        company = await tenant_service.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Company not found"
+            )
+        
+        if not company.encrypted_access_token:
+            return {
+                "company_id": company_id,
+                "has_oauth": False,
+                "message": "OAuth not connected"
+            }
+        
+        # Get valid token
+        access_token = await token_manager_service.get_valid_token(db, company_id)
+        
+        # Use tokeninfo endpoint to check scopes
+        import requests
+        response = requests.get(
+            f"https://www.googleapis.com/oauth2/v1/tokeninfo?access_token={access_token}",
+            timeout=10
+        )
+        if response.status_code == 200:
+            token_info = response.json()
+            scopes = token_info.get("scope", "").split()
+            return {
+                "company_id": company_id,
+                "company_name": company.name,
+                "has_oauth": True,
+                "scopes": scopes,
+                "has_sheets_scope": "https://www.googleapis.com/auth/spreadsheets" in scopes,
+                "has_gmail_scope": "https://www.googleapis.com/auth/gmail.modify" in scopes,
+                "has_drive_scope": any("drive" in s for s in scopes),
+                "expires_in": token_info.get("expires_in"),
+                "audience": token_info.get("audience")
+            }
+        else:
+            return {
+                "company_id": company_id,
+                "has_oauth": True,
+                "error": "Could not verify token scopes",
+                "status_code": response.status_code
+            }
+    except Exception as e:
+        logger.error(f"Error checking OAuth scopes: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking scopes: {str(e)}"
         )
 
 

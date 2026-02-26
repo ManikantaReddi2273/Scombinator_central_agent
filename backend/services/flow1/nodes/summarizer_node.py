@@ -29,13 +29,16 @@ async def summarizer_node(state: Flow1State) -> Dict:
     intent = state.get("intent", "Inquiry")
     thread_count = state.get("thread_count", 0)
     
-    # Get company name from brand context (if available)
+    # Get company name from brand context (loaded from Redis cache via orchestrator)
     company_name = "Company"
     brand_context = state.get("brand_context")
     if brand_context and isinstance(brand_context, dict):
         key_points = brand_context.get("key_points", {})
         if isinstance(key_points, dict):
             company_name = key_points.get("company_name", "Company")
+            logger.info(f"Using brand context company_name: {company_name}")
+    else:
+        logger.warning("Brand context not available in state - using default company name")
     
     # Truncate body to 1500 chars for context
     body_truncated = body[:1500] if len(body) > 1500 else body
@@ -45,53 +48,77 @@ async def summarizer_node(state: Flow1State) -> Dict:
     if thread_count > 0:
         thread_note = f"\nNOTE: This is a follow-up email ({thread_count + 1}rd/{(thread_count + 1)}th in thread). Consider conversation context."
     
-    # Enhanced prompt with better examples and structure
-    prompt = f"""Create an executive summary that explains WHAT THIS EMAIL MEANS FOR THE BUSINESS and WHAT ACTION IS NEEDED. Do NOT quote or paraphrase the email content.
+    # Enhanced prompt with few-shot examples aligned with blueprint
+    prompt = f"""Create an executive summary (1-2 sentences, max 150 chars) that explains WHAT THIS EMAIL MEANS FOR THE BUSINESS and WHAT ACTION IS NEEDED. Explain business meaning, NOT email content.
 
-COMPANY CONTEXT:
-Company: {company_name}
-
-EMAIL DETAILS:
-Subject: {subject}
-Body: {body_truncated}
-Classified as: {function} / {intent}
+COMPANY: {company_name}
+EMAIL: {subject}
+BODY: {body_truncated}
+CLASSIFIED: {function} / {intent}
 {thread_note}
 
-SUMMARY REQUIREMENTS:
-1. Length: Exactly 1-2 sentences, maximum 150 characters (strict limit)
-2. Format: Start with business context, end with required action
-3. Style: Direct, professional, executive-ready
-4. Content: Explain business meaning, NOT email content
-5. NO quotes, NO paraphrasing, NO "the email says"
+REQUIREMENTS:
+- 1-2 sentences, max 150 characters
+- Format: "[Business Context] - [Required Action]"
+- NO quotes, NO paraphrasing, NO "the email says"
+- Direct, professional, executive-ready
 
-GOOD SUMMARY STRUCTURE:
-"[Business Context] - [Required Action]"
+FEW-SHOT EXAMPLES:
 
-EXCELLENT EXAMPLES (copy this style):
+Example 1:
+Input:
+Subject: "Enterprise Pricing Inquiry"
+Body: "Hi, I'm reaching out on behalf of TechCorp. We're interested in your platform for 50+ employees. Could you provide pricing details?"
+Output: Enterprise customer requesting pricing for 50+ users - needs pricing proposal and sales call
 
-✓ "Enterprise customer requesting pricing for 100+ users - needs pricing proposal and sales call"
-✓ "Senior developer candidate submitted resume for open position - requires technical review and interview scheduling"
-✓ "Customer reporting critical login failure affecting multiple users - needs immediate technical support escalation"
-✓ "Prospect following up on product demo request from last week - needs scheduling confirmation and preparation"
-✓ "Follow-up email (3rd in thread) - customer asking about implementation timeline after pricing discussion"
-✓ "Legal team inquiry about data processing agreement terms - requires compliance review and contract clarification"
-✓ "Potential client expressing pricing concerns and comparing to competitor - needs value proposition and negotiation"
-✓ "Job applicant asking about remote work policy for engineering role - needs HR policy clarification"
+Example 2:
+Input:
+Subject: "Application for Senior Developer"
+Body: "I've attached my resume for the position. I have 8 years of experience in Python and React."
+Output: Senior developer candidate submitted resume for open position - requires technical review and interview scheduling
 
-BAD EXAMPLES (avoid these patterns):
-✗ "The email says they want pricing" (quotes content)
-✗ "Customer wrote that they are interested" (paraphrases content)
-✗ "According to the email, they need help" (references email)
-✗ "They mentioned a job application" (paraphrases)
-✗ "Email about pricing inquiry" (too vague, no action)
+Example 3:
+Input:
+Subject: "URGENT - System Down"
+Body: "Our customers can't login. This is critical. Need help immediately!"
+Output: Customer reporting critical login failure affecting multiple users - needs immediate technical support escalation
 
-YOUR TASK:
-Analyze this email and write a summary following the GOOD examples above. Focus on:
-- WHO is contacting (customer, candidate, partner, etc.)
-- WHAT business need they represent (sales opportunity, hiring need, support issue, etc.)
-- WHAT action is required (proposal, review, escalation, scheduling, etc.)
+Example 4:
+Input:
+Subject: "Re: Product Demo"
+Body: "Just following up on my email from last week about scheduling a demo. Any update?"
+Output: Prospect following up on product demo request from last week - needs scheduling confirmation and preparation
 
-Write the summary now (max 150 chars, business-meaning focused):"""
+Example 5:
+Input:
+Subject: "Contract Review Needed"
+Body: "We need to review the data processing agreement before signing. Can you clarify section 3.2?"
+Output: Legal team inquiry about data processing agreement terms - requires compliance review and contract clarification
+
+Example 6:
+Input:
+Subject: "Too expensive"
+Body: "Your pricing is too high compared to competitors. We're looking elsewhere."
+Output: Potential client expressing pricing concerns and comparing to competitor - needs value proposition and negotiation
+
+Example 7:
+Input:
+Subject: "Question about remote work"
+Body: "I'm interested in the engineering role. Do you offer remote work options?"
+Output: Job applicant asking about remote work policy for engineering role - needs HR policy clarification
+
+Example 8:
+Input:
+Subject: "Order #12345 Status"
+Body: "Hi, can you check the status of my order? It was supposed to arrive yesterday."
+Output: Customer inquiring about delayed order delivery - needs order status update and resolution
+
+NOW CREATE SUMMARY FOR THIS EMAIL:
+Subject: {subject}
+Body: {body_truncated}
+Classified: {function} / {intent}
+
+Return ONLY the summary text (max 150 chars):"""
 
     messages = [
         {

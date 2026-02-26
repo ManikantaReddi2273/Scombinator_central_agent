@@ -35,6 +35,8 @@ class EmailResponse(BaseModel):
     gmail_message_id: Optional[str] = None  # Gmail message ID for threading
     thread_history: list = []  # Previous emails in thread
     thread_count: int = 0  # Number of previous emails
+    email_type: Optional[str] = None  # "inbound" or "outbound"
+    recipient_context: Optional[Dict[str, Any]] = None  # For outbound: lead_id, name, company, etc. (for CRM update)
     function: Optional[str]
     intent: Optional[str]
     priority_score: Optional[str]

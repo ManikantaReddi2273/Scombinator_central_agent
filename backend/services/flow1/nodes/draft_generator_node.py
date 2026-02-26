@@ -146,7 +146,10 @@ async def draft_generator_node(state: Flow1State, config=None) -> Dict:
     thread_history = state.get("thread_history", [])  # Always a list
     thread_count = state.get("thread_count", 0)  # Always an int
     
-    # Get brand context from state (full context for draft generation)
+    # Get brand context from state (loaded from Redis cache via orchestrator)
+    # Brand context structure: {"full": {...}, "key_points": {...}}
+    # - full: Complete documents from Drive (company, voice, playbooks, policies, knowledge, templates)
+    # - key_points: Extracted lightweight points for optimization
     templates = {}
     brand_tone = None
     knowledge = None
@@ -158,7 +161,7 @@ async def draft_generator_node(state: Flow1State, config=None) -> Dict:
     if brand_context and isinstance(brand_context, dict):
         full_context = brand_context.get("full", {})
         if isinstance(full_context, dict):
-            # Get full documents
+            # Get full documents from brand context (loaded from Drive, cached in Redis)
             templates = full_context.get("templates", {})
             voice_content = full_context.get("voice", "")
             knowledge = full_context.get("knowledge", "")
@@ -169,8 +172,12 @@ async def draft_generator_node(state: Flow1State, config=None) -> Dict:
             # Use full voice content (not truncated) - it's critical for brand consistency
             if voice_content:
                 brand_tone = voice_content  # Use full document for better context
+            
+            logger.info(f"Using brand context: {len(templates)} templates, voice={'yes' if brand_tone else 'no'}, policies={'yes' if policies else 'no'}")
+    else:
+        logger.warning("Brand context not available in state - draft generation may not match brand voice")
     
-    # Fallback: Try old policy_loader_service if brand context not available
+    # Fallback: Try old policy_loader_service if brand context not available (should not happen in normal flow)
     if not templates and not brand_tone:
         # Extract db from config if available
         db = None
@@ -324,8 +331,8 @@ ACTION TYPE: Standard Response
 - Include next steps or call-to-action
 - Be professional and friendly"""
     
-    # Optimized prompt with better structure and specific instructions
-    prompt = f"""You are a professional email writer for {company_info.splitlines()[0].replace('**Company Name** |', '').strip() if company_info else 'a company'}. Write a COMPLETE, DETAILED email response that directly addresses the sender's inquiry. This email will be sent to a real person - make it helpful, specific, and actionable.
+    # Enhanced prompt with few-shot examples aligned with brand voice
+    prompt = f"""You are a professional email writer for {company_info.splitlines()[0].replace('**Company Name** |', '').strip() if company_info else 'a company'}. Write a COMPLETE, DETAILED email response that directly addresses the sender's inquiry.
 
 ORIGINAL EMAIL RECEIVED:
 Subject: {email_subject}
@@ -344,67 +351,33 @@ EMAIL CONTEXT:
 {policies_context}
 {action_guidance}
 
-CRITICAL INSTRUCTIONS:
-1. READ THE ORIGINAL EMAIL CAREFULLY - What specific question or request did they make?
-2. ADDRESS THEIR ACTUAL QUESTION - Don't give a generic response. Answer what they asked.
-3. FOLLOW BRAND VOICE RULES EXACTLY - See brand voice section above for specific rules
-4. FOLLOW POLICIES EXACTLY - See policies section above, especially for pricing inquiries
-5. USE TEMPLATE IF PROVIDED - If a template is provided, follow its structure and tone closely
-6. BE SPECIFIC AND HELPFUL - Provide real information, not vague promises
-7. INCLUDE NEXT STEPS - What happens next? What should they do?
+REQUIREMENTS:
+1. Address their specific question/request directly
+2. Follow brand voice rules exactly (see above)
+3. Follow policies exactly (especially pricing)
+4. Use template if provided
+5. Be specific and helpful
+6. Include clear next steps
+7. 2-4 paragraphs (shorter is better)
 
-WRITING REQUIREMENTS:
+BRAND VOICE RULES (MUST FOLLOW):
+- Get to the point quickly
+- Use "you" and "your" - make it about them
+- Use contractions: "We're", "you'll", "I'd"
+- Short paragraphs (2-3 sentences max)
+- End with clear next step
+- NEVER use "Best regards" - use "Best," instead
+- NEVER use "I hope this email finds you well"
+- NEVER use corporate jargon
+- Sound like a human wrote it
 
-1. STRUCTURE (include all parts):
-   - Professional greeting (Hi/Hello [Name if available], or "Hi there" if name unknown)
-   - Opening: Acknowledge their email/inquiry (1-2 sentences)
-   - Body: Address their question/request (2-3 paragraphs)
-   - Closing: Professional sign-off (see brand voice rules for approved sign-offs)
+FEW-SHOT EXAMPLES:
 
-2. BRAND VOICE RULES (MUST FOLLOW):
-   - Get to the point quickly - first sentence should tell them why you're writing
-   - Use "you" and "your" - make it about them, not us
-   - Use contractions: "We're" not "We are", "you'll" not "you will"
-   - One idea per paragraph - short paragraphs (2-3 sentences max)
-   - End with a clear next step
-   - NEVER use "Best regards" - use "Best," or "Cheers," instead
-   - NEVER use "I hope this email finds you well" - it's filler
-   - NEVER use "please do not hesitate to contact" - just say "reply to this email"
-   - NEVER use corporate jargon: "synergy", "leverage", "circle back", "touch base"
-   - Keep it under 5 paragraphs for most emails
-   - Sound like a human wrote it, not a robot
-
-3. CONTENT GUIDELINES:
-   - Address their specific question or request from the original email
-   - Be helpful, clear, and professional
-   - Match the brand tone exactly (see brand voice section above)
-   - Keep total length appropriate (2-4 paragraphs for most emails, longer only if needed)
-
-4. FUNCTION-SPECIFIC TONE:
-   - Sales: Helpful, informative, suggest next steps, include value proposition
-   - Hiring: Professional, acknowledge application, set clear expectations, mention timeline
-   - Support: Empathetic, solution-focused, offer help, provide next steps
-   - Legal: Formal, refer to appropriate channels, professional boundaries
-   - Marketing: Engaging, informative, highlight benefits
-   - Ops: Clear, action-oriented, provide status/next steps
-
-5. FORBIDDEN (do NOT include):
-   - Markdown formatting (**, ---, #, etc.)
-   - Code blocks or instructions
-   - Placeholders like [Your Name], [Company Name]
-   - Meta-commentary or notes
-   - Explanations about the email itself
-   - "Here's a response" or similar phrases
-   - "Best regards" (use "Best," instead)
-   - Corporate jargon
-
-6. OUTPUT FORMAT:
-   - Plain text only
-   - No quotes around the text
-   - No markdown
-   - Ready to send directly
-
-EXAMPLE FOR SALES PRICING INQUIRY (following brand voice and pricing policy):
+Example 1 - Sales Pricing Inquiry:
+Input:
+Subject: "Enterprise Pricing Inquiry"
+Body: "Hi, I'm reaching out on behalf of TechCorp. We're interested in your platform for 50+ employees. Could you provide pricing details?"
+Output:
 Hi Sarah,
 
 Great question! Pricing depends on your setup — ticket volume, integrations, how you want to use it.
@@ -414,9 +387,12 @@ Rather than give you a generic number, I'd prefer to understand your situation a
 What works this week?
 
 Best,
-[Your Name]
 
-EXAMPLE FOR DEMO/SCHEDULING REQUEST (following brand voice - short, direct, specific times):
+Example 2 - Demo/Scheduling Request:
+Input:
+Subject: "Product Demo Request"
+Body: "I'd like to schedule a demo to see how your platform works. I have questions about onboarding and integrations."
+Output:
 Hi Michael,
 
 Happy to schedule a demo! I can show you how Resolvely works and answer your questions about onboarding, integrations, and training.
@@ -429,16 +405,59 @@ Here are a few times that work for me next week:
 Which works best for you? Or suggest another time if these don't work.
 
 Best,
-[Your Name]
+
+Example 3 - Support Inquiry:
+Input:
+Subject: "Question about API integration"
+Body: "How do I integrate your API with our existing system? Do you have documentation?"
+Output:
+Hi there,
+
+Yes, we have comprehensive API documentation. You can find it at [link] or I can send you a quick guide.
+
+The integration is straightforward — most customers get it set up in about an hour. If you run into any issues, just reply to this email and I'll help.
+
+Best,
+
+Example 4 - Hiring Application:
+Input:
+Subject: "Application for Senior Developer"
+Body: "I've attached my resume for the position. I have 8 years of experience."
+Output:
+Hi [Name],
+
+Thanks for your interest in joining our team. We've received your application and our hiring team will review it carefully.
+
+We'll be in touch within the next week if we'd like to move forward with next steps.
+
+Best,
+
+Example 5 - Follow-up Email:
+Input:
+Subject: "Re: Product Demo"
+Body: "Just following up on my email from last week about scheduling a demo. Any update?"
+Output:
+Hi Michael,
+
+Thanks for following up! I'd be happy to schedule that demo.
+
+Here are a few times that work for me this week:
+- Tuesday at 2 PM IST
+- Wednesday at 10 AM IST
+- Thursday at 4 PM IST
+
+Which works best for you?
+
+Best,
 
 NOW WRITE THE EMAIL RESPONSE:
-Based on the original email above, write a COMPLETE, DETAILED response that:
+Based on the original email above, write a COMPLETE response that:
 - Directly answers their specific question/request
 - Provides helpful, actionable information
 - Includes clear next steps
-- For scheduling requests: MUST include 2-3 specific time slots (day and time)
-- Length: 2-4 paragraphs (shorter is better - be concise)
-- Sounds professional and helpful
+- For scheduling: MUST include 2-3 specific time slots
+- Length: 2-4 paragraphs
+- Follows brand voice rules exactly
 
 Return ONLY the email body text, nothing else:"""
 

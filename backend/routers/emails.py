@@ -126,6 +126,14 @@ async def process_email(
                 "message": result.get("message", "Email was already processed")
             }
         
+        email_id_str = result.get("email_id")
+        if email_id_str:
+            try:
+                from services.lead_replied_crm import record_lead_replied_if_applicable
+                await record_lead_replied_if_applicable(db, email_id_str)
+            except Exception as e:
+                logger.warning("Could not record lead replied in CRM: %s", e)
+        
         return {
             "email_id": result["email_id"],
             "draft_id": result.get("draft_id"),
@@ -280,6 +288,18 @@ async def get_email(
             logger.warning(f"Error loading thread history for email {email_id}: {str(e)}")
             # Continue with empty history
     
+    # Parse recipient_context for outbound/reply-in-thread (n8n uses it for update-crm lead_id)
+    recipient_context = None
+    if email.recipient_context:
+        try:
+            import json
+            if isinstance(email.recipient_context, dict):
+                recipient_context = email.recipient_context
+            else:
+                recipient_context = json.loads(email.recipient_context)
+        except Exception:
+            pass
+    
     return EmailResponse(
         id=email.id,
         company_id=email.company_id,
@@ -290,6 +310,8 @@ async def get_email(
         gmail_message_id=email.gmail_message_id,  # Include for threading
         thread_history=thread_history,
         thread_count=thread_count,
+        email_type=email.email_type,  # Include email_type for n8n workflow
+        recipient_context=recipient_context,
         function=email.function,
         intent=email.intent,
         priority_score=email.priority_score,

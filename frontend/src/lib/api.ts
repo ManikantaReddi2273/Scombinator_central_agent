@@ -86,3 +86,22 @@ export const dashboardAPI = {
   getStats: () => api.get('/api/dashboard/stats'),
 }
 
+export const outboundAPI = {
+  getB2BLeads: (companyId: string) =>
+    api.get('/api/outbound/b2b/leads', { params: { company_id: companyId } }),
+  getLeadActivities: (companyId: string, leadId: string) =>
+    api.get(`/api/outbound/b2b/leads/${leadId}/activities`, { params: { company_id: companyId } }),
+  createOutboundEmail: (data: {
+    company_id: string;
+    lead_id: string;
+    email_type?: string;
+    intent?: string;
+    trigger_type?: string;
+  }) => api.post('/api/outbound/create', data, { timeout: 90000 }),
+  updateCRMAfterSend: (draftId: string, data: {
+    lead_id: string;
+    activity_summary?: string;
+    next_followup_date?: string;
+  }) => api.post(`/api/outbound/sent/${draftId}/update-crm`, data),
+}
+

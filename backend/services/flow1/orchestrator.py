@@ -11,6 +11,7 @@ from .state import Flow1State
 from .graph import flow1_graph
 from models.email import Email
 from models.draft import Draft
+from services.email_thread import get_lead_id_from_thread_root
 import logging
 
 logger = logging.getLogger(__name__)
@@ -223,7 +224,14 @@ class Flow1Orchestrator:
             recommended_action=state.get("recommended_action"),
             classification_metadata=state.get("classification_metadata") or {}
         )
-        
+        # If this is a reply in a thread, attach lead_id from thread root (outbound B2B) so CRM can be updated when we send the reply
+        thread_id = state.get("thread_id")
+        if thread_id:
+            lead_id = await get_lead_id_from_thread_root(db, state["company_id"], thread_id)
+            if lead_id:
+                email_record.recipient_context = {"lead_id": lead_id}
+                logger.info("Inbound reply in B2B thread: attached lead_id=%s from thread root", lead_id)
+
         try:
             db.add(email_record)
             await db.commit()

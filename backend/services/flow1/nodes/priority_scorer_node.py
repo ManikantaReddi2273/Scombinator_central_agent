@@ -30,13 +30,17 @@ async def priority_scorer_node(state: Flow1State) -> Dict:
     confidence = state.get("confidence", "Missing info")
     thread_count = state.get("thread_count", 0)
     
-    # Get SLA rules from brand context (if available)
+    # Get SLA rules from brand context (loaded from Redis cache via orchestrator)
     sla_rules = ""
     brand_context = state.get("brand_context")
     if brand_context and isinstance(brand_context, dict):
         key_points = brand_context.get("key_points", {})
         if isinstance(key_points, dict):
             sla_rules = key_points.get("sla_rules", "")
+            if sla_rules:
+                logger.info(f"Using brand context SLA rules for priority scoring")
+    else:
+        logger.warning("Brand context not available in state - priority scoring without SLA rules")
     
     # Add thread context note if this is part of an ongoing conversation
     thread_note = ""
@@ -49,8 +53,8 @@ async def priority_scorer_node(state: Flow1State) -> Dict:
     if sla_rules:
         sla_context = f"\n\nCOMPANY SLA RULES (apply these when calculating priority):\n{sla_rules}\n"
     
-    # Enhanced prompt with explicit calculation steps
-    prompt = f"""Calculate a priority score (0-100) for this email. Use the scoring formula below and return the EXACT calculated number.
+    # Enhanced prompt with few-shot examples showing step-by-step calculations
+    prompt = f"""Calculate a priority score (0-100) for this email using the scoring formula. Return the EXACT calculated number.
 
 EMAIL CLASSIFICATION:
 - Function: {function}
@@ -61,89 +65,115 @@ EMAIL CLASSIFICATION:
 {thread_note}
 {sla_context}
 
-SCORING FORMULA (calculate step by step):
+SCORING FORMULA:
 
 STEP 1: Base Score from Impact
-   - Revenue impact → Start with 75
-   - Hiring impact → Start with 65
-   - Brand impact → Start with 55
-   - Low impact → Start with 25
+   - Revenue → 75
+   - Hiring → 65
+   - Brand → 55
+   - Low → 25
 
 STEP 2: Add Urgency Points
-   - Immediate → Add 20 points
-   - Soon → Add 10 points
-   - Can wait → Add 0 points
+   - Immediate → +20
+   - Soon → +10
+   - Can wait → +0
 
 STEP 3: Add Intent Points
-   - Complaint → Add 15 points
-   - Objection → Add 15 points
-   - Application (only if Hiring) → Add 10 points
-   - Scheduling → Add 5 points
-   - Inquiry → Add 5 points
-   - Follow-up → Add 0 points
-   - FAQ → Subtract 5 points
+   - Complaint → +15
+   - Objection → +15
+   - Application (only if Hiring) → +10
+   - Scheduling → +5
+   - Inquiry → +5
+   - Follow-up → +0
+   - FAQ → -5
 
 STEP 4: Apply Confidence Penalty
-   - Clear → No change (0 points)
-   - Ambiguous → Subtract 5 points
-   - Missing info → Subtract 10 points
+   - Clear → 0
+   - Ambiguous → -5
+   - Missing info → -10
 
-STEP 5: Special Multipliers (apply after all additions)
-   - Legal function → Multiply final score by 1.15 (max 100)
-   - Support + Complaint → Add 10 bonus points
-   - Sales + Revenue + Immediate → Set to 95-100 range
-   - Support + Complaint + Immediate → Set to 90-100 range
+STEP 5: Special Multipliers
+   - Legal function → ×1.15 (max 100)
+   - Support + Complaint → +10
+   - Sales + Revenue + Immediate → Set to 95-100
+   - Support + Complaint + Immediate → Set to 90-100
 
 STEP 6: Final Clamp
-   - Ensure score is between 0 and 100
+   - Between 0 and 100
    - Round to nearest integer
 
-CALCULATION EXAMPLES:
+FEW-SHOT CALCULATION EXAMPLES:
 
-Example 1: Sales + Inquiry + Soon + Revenue + Clear
-   Base: 75 (Revenue)
-   + Urgency: +10 (Soon) = 85
-   + Intent: +5 (Inquiry) = 90
-   + Confidence: 0 (Clear) = 90
-   Final: 90
+Example 1:
+Input: Sales + Inquiry + Soon + Revenue + Clear
+Calculation:
+  Base: 75 (Revenue)
+  + Urgency: +10 (Soon) = 85
+  + Intent: +5 (Inquiry) = 90
+  + Confidence: 0 (Clear) = 90
+Output: {{"score": 90}}
 
-Example 2: Support + Complaint + Immediate + Brand + Clear
-   Base: 55 (Brand)
-   + Urgency: +20 (Immediate) = 75
-   + Intent: +15 (Complaint) = 90
-   + Confidence: 0 (Clear) = 90
-   + Special: +10 (Support+Complaint) = 100
-   Final: 100
+Example 2:
+Input: Support + Complaint + Immediate + Brand + Clear
+Calculation:
+  Base: 55 (Brand)
+  + Urgency: +20 (Immediate) = 75
+  + Intent: +15 (Complaint) = 90
+  + Confidence: 0 (Clear) = 90
+  + Special: +10 (Support+Complaint) = 100
+Output: {{"score": 100}}
 
-Example 3: Hiring + Application + Soon + Hiring + Clear
-   Base: 65 (Hiring)
-   + Urgency: +10 (Soon) = 75
-   + Intent: +10 (Application) = 85
-   + Confidence: 0 (Clear) = 85
-   Final: 85
+Example 3:
+Input: Hiring + Application + Soon + Hiring + Clear
+Calculation:
+  Base: 65 (Hiring)
+  + Urgency: +10 (Soon) = 75
+  + Intent: +10 (Application) = 85
+  + Confidence: 0 (Clear) = 85
+Output: {{"score": 85}}
 
-Example 4: Support + FAQ + Can wait + Low + Clear
-   Base: 25 (Low)
-   + Urgency: +0 (Can wait) = 25
-   + Intent: -5 (FAQ) = 20
-   + Confidence: 0 (Clear) = 20
-   Final: 20
+Example 4:
+Input: Support + FAQ + Can wait + Low + Clear
+Calculation:
+  Base: 25 (Low)
+  + Urgency: +0 (Can wait) = 25
+  + Intent: -5 (FAQ) = 20
+  + Confidence: 0 (Clear) = 20
+Output: {{"score": 20}}
 
-Example 5: Legal + Inquiry + Soon + Low + Clear
-   Base: 25 (Low)
-   + Urgency: +10 (Soon) = 35
-   + Intent: +5 (Inquiry) = 40
-   + Confidence: 0 (Clear) = 40
-   + Special: ×1.15 = 46
-   Final: 46
+Example 5:
+Input: Legal + Inquiry + Soon + Low + Clear
+Calculation:
+  Base: 25 (Low)
+  + Urgency: +10 (Soon) = 35
+  + Intent: +5 (Inquiry) = 40
+  + Confidence: 0 (Clear) = 40
+  + Special: ×1.15 = 46
+Output: {{"score": 46}}
+
+Example 6:
+Input: Sales + Objection + Soon + Revenue + Clear
+Calculation:
+  Base: 75 (Revenue)
+  + Urgency: +10 (Soon) = 85
+  + Intent: +15 (Objection) = 100
+  + Confidence: 0 (Clear) = 100
+Output: {{"score": 100}}
+
+Example 7:
+Input: Marketing + Inquiry + Can wait + Low + Ambiguous
+Calculation:
+  Base: 25 (Low)
+  + Urgency: +0 (Can wait) = 25
+  + Intent: +5 (Inquiry) = 30
+  + Confidence: -5 (Ambiguous) = 25
+Output: {{"score": 25}}
 
 NOW CALCULATE FOR THIS EMAIL:
 Function: {function}, Intent: {intent}, Urgency: {urgency}, Impact: {impact}, Confidence: {confidence}
 
-Show your calculation and return the final score as JSON:
-{{"score": <calculated_number>}}
-
-Return ONLY the JSON object with the calculated score:"""
+Show your step-by-step calculation and return:
+{{"score": <calculated_number>}}"""
 
     messages = [
         {

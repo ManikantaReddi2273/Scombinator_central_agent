@@ -29,6 +29,11 @@ class GoogleAPIService:
         credentials = await self.token_manager.get_credentials(db, company_id)
         return build('gmail', 'v1', credentials=credentials)
     
+    async def get_sheets_service(self, db: AsyncSession, company_id: str):
+        """Get Google Sheets service instance"""
+        credentials = await self.token_manager.get_credentials(db, company_id)
+        return build('sheets', 'v4', credentials=credentials)
+    
     async def list_drive_files(
         self,
         db: AsyncSession,
@@ -382,6 +387,272 @@ class GoogleAPIService:
         except Exception as e:
             logger.error(f"Error loading brand context folder for {company_name}: {str(e)}")
             return brand_context
+    
+    async def read_spreadsheet(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        spreadsheet_id: str,
+        range_name: Optional[str] = None
+    ) -> List[List[str]]:
+        """
+        Read data from a Google Sheets spreadsheet
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            spreadsheet_id: Google Sheets spreadsheet ID (from file ID)
+            range_name: Optional A1 notation range (e.g., "Sheet1!A1:Z100" or just "Sheet1"). 
+                       If None, reads entire first sheet.
+                       Can be just worksheet name (e.g., "LEADS") or full range (e.g., "LEADS!A:Z")
+        
+        Returns:
+            List of rows, where each row is a list of cell values
+        """
+        try:
+            service = await self.get_sheets_service(db, company_id)
+            
+            # If no range specified, read entire first sheet
+            if not range_name:
+                range_name = "Sheet1"
+            # If range_name is just a worksheet name (no !), add !A:Z to read entire sheet
+            elif '!' not in range_name:
+                range_name = f"{range_name}!A:Z"
+            
+            logger.debug(f"Reading spreadsheet {spreadsheet_id} with range: {range_name}")
+            
+            result = service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=range_name
+            ).execute()
+            
+            values = result.get('values', [])
+            logger.debug(f"Read {len(values)} rows from spreadsheet {spreadsheet_id}, range {range_name}")
+            return values
+        except HttpError as error:
+            error_details = str(error)
+            logger.error(f"Error reading spreadsheet {spreadsheet_id}, range {range_name}: {error_details}")
+            # Provide more helpful error message
+            if "Unable to parse range" in error_details or "Unable to parse" in error_details:
+                raise Exception(f"Worksheet '{range_name}' not found. Please check the worksheet name matches exactly (case-sensitive).")
+            raise Exception(f"Error reading spreadsheet: {error_details}")
+    
+    async def write_spreadsheet_row(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        spreadsheet_id: str,
+        range_name: str,
+        values: List[str]
+    ) -> Dict:
+        """
+        Append a row to a Google Sheets spreadsheet
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            spreadsheet_id: Google Sheets spreadsheet ID
+            range_name: A1 notation range for where to append (e.g., "Sheet1!A:Z")
+            values: List of cell values for the new row
+        
+        Returns:
+            Update response from Sheets API
+        """
+        try:
+            service = await self.get_sheets_service(db, company_id)
+            
+            body = {
+                'values': [values]
+            }
+            
+            result = service.spreadsheets().values().append(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                valueInputOption='USER_ENTERED',
+                insertDataOption='INSERT_ROWS',
+                body=body
+            ).execute()
+            
+            logger.debug(f"Appended row to spreadsheet {spreadsheet_id}")
+            return result
+        except HttpError as error:
+            logger.error(f"Error writing to spreadsheet {spreadsheet_id}: {error}")
+            raise Exception(f"Error writing to spreadsheet: {error}")
+    
+    async def update_spreadsheet_cell(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        spreadsheet_id: str,
+        range_name: str,
+        value: str
+    ) -> Dict:
+        """
+        Update a single cell or range of cells in a Google Sheets spreadsheet
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            spreadsheet_id: Google Sheets spreadsheet ID
+            range_name: A1 notation range (e.g., "Sheet1!A2" for single cell, "Sheet1!A2:B2" for range)
+            value: Value to set (for range, use nested list)
+        
+        Returns:
+            Update response from Sheets API
+        """
+        try:
+            service = await self.get_sheets_service(db, company_id)
+            
+            # If value is a string, wrap it in a list for single cell update
+            if isinstance(value, str):
+                body = {
+                    'values': [[value]]
+                }
+            else:
+                body = {
+                    'values': value
+                }
+            
+            result = service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                valueInputOption='USER_ENTERED',
+                body=body
+            ).execute()
+            
+            logger.debug(f"Updated cell(s) in spreadsheet {spreadsheet_id} at {range_name}")
+            return result
+        except HttpError as error:
+            logger.error(f"Error updating spreadsheet {spreadsheet_id}: {error}")
+            raise Exception(f"Error updating spreadsheet: {error}")
+    
+    async def convert_excel_to_sheets(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        excel_file_id: str,
+        excel_file_name: str,
+        folder_id: Optional[str] = None
+    ) -> Dict:
+        """
+        Convert an Excel file to Google Sheets format
+        Checks if a converted version already exists to avoid duplicates
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            excel_file_id: Excel file ID in Google Drive
+            excel_file_name: Name of the Excel file
+            folder_id: Optional folder ID where the Excel file is located
+        
+        Returns:
+            Dict with 'id' and 'name' of the converted Google Sheets file
+        """
+        try:
+            service = await self.get_drive_service(db, company_id)
+            
+            # Generate the expected name for the converted file (without .xlsx extension)
+            converted_name = excel_file_name.replace('.xlsx', '').replace('.XLSX', '').replace('.xls', '').replace('.XLS', '')
+            
+            # Check if a converted version already exists
+            query = f"name='{converted_name}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+            if folder_id:
+                query += f" and '{folder_id}' in parents"
+            
+            existing_results = service.files().list(
+                q=query,
+                fields="files(id, name, mimeType)",
+                pageSize=1
+            ).execute()
+            
+            existing_files = existing_results.get('files', [])
+            if existing_files:
+                logger.info(f"Found existing Google Sheets version of '{excel_file_name}': {existing_files[0]['name']} (ID: {existing_files[0]['id']})")
+                return {'id': existing_files[0]['id'], 'name': existing_files[0]['name']}
+            
+            # No existing converted file, create a new one
+            # Copy the Excel file and convert it to Google Sheets format
+            file_metadata = {
+                'name': converted_name,
+                'mimeType': 'application/vnd.google-apps.spreadsheet'
+            }
+            
+            # Copy the file with conversion
+            converted_file = service.files().copy(
+                fileId=excel_file_id,
+                body=file_metadata
+            ).execute()
+            
+            logger.info(f"Converted Excel file '{excel_file_name}' to Google Sheets format. New ID: {converted_file['id']}")
+            return {'id': converted_file['id'], 'name': converted_file['name']}
+        except HttpError as error:
+            logger.error(f"Error converting Excel file to Google Sheets: {error}")
+            raise Exception(f"Error converting Excel to Google Sheets: {error}")
+    
+    async def find_spreadsheet_by_name(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        spreadsheet_name: str,
+        folder_id: Optional[str] = None
+    ) -> Optional[Dict]:
+        """
+        Find a Google Sheets spreadsheet or Excel file by name
+        If Excel file is found, it will be converted to Google Sheets format
+        
+        Args:
+            db: Database session
+            company_id: Company ID
+            spreadsheet_name: Name of the spreadsheet file
+            folder_id: Optional folder ID to search within
+        
+        Returns:
+            Dict with 'id' and 'name' if found, None otherwise
+        """
+        try:
+            service = await self.get_drive_service(db, company_id)
+            
+            # First, try to find Google Sheets format
+            query = f"name='{spreadsheet_name}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+            if folder_id:
+                query += f" and '{folder_id}' in parents"
+            
+            results = service.files().list(
+                q=query,
+                fields="files(id, name, mimeType)",
+                pageSize=10
+            ).execute()
+            
+            files = results.get('files', [])
+            if files:
+                logger.info(f"Found Google Sheets '{spreadsheet_name}' with ID: {files[0]['id']}")
+                return {'id': files[0]['id'], 'name': files[0]['name']}
+            
+            # If not found, try to find Excel file
+            excel_query = f"name='{spreadsheet_name}' and (mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='application/vnd.ms-excel') and trashed=false"
+            if folder_id:
+                excel_query += f" and '{folder_id}' in parents"
+            
+            excel_results = service.files().list(
+                q=excel_query,
+                fields="files(id, name, mimeType)",
+                pageSize=10
+            ).execute()
+            
+            excel_files = excel_results.get('files', [])
+            if excel_files:
+                logger.info(f"Found Excel file '{spreadsheet_name}' with ID: {excel_files[0]['id']}. Converting to Google Sheets format...")
+                # Convert Excel to Google Sheets
+                converted = await self.convert_excel_to_sheets(
+                    db, company_id, excel_files[0]['id'], excel_files[0]['name'], folder_id
+                )
+                return converted
+            
+            logger.debug(f"Spreadsheet '{spreadsheet_name}' not found")
+            return None
+        except HttpError as error:
+            logger.error(f"Error finding spreadsheet '{spreadsheet_name}': {error}")
+            raise Exception(f"Error finding spreadsheet: {error}")
 
 
 # Singleton instance

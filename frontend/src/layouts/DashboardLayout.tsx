@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   X,
+  Send,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '../components/ui/button'
@@ -28,6 +29,7 @@ export default function DashboardLayout() {
     { to: '/priority-queue', icon: TrendingUp, label: 'Priority Queue' },
     { to: '/drafts', icon: FileText, label: 'Drafts' },
     { to: '/emails', icon: Mail, label: 'Emails' },
+    { to: '/outbound/b2b', icon: Send, label: 'B2B Outbound' },
     { to: '/companies', icon: Building2, label: 'Companies' },
   ]
 

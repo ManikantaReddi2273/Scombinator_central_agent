@@ -26,6 +26,9 @@ class Company(Base):
     # n8n reference (for mapping)
     n8n_credential_id = Column(String(255), nullable=True, index=True)
     
+    # Google Drive folder ID for company's CRM files
+    drive_folder_id = Column(String(255), nullable=True)  # Google Drive folder ID for company's CRM files
+    
     # Status
     status = Column(String(50), default="active", nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

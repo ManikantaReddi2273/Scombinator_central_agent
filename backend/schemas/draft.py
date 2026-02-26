@@ -37,3 +37,9 @@ class DraftApproveRequest(BaseModel):
     draft_id: UUID
     edited_body: Optional[str] = None  # If admin edited the draft
 
+
+class DraftSentRequest(BaseModel):
+    """Optional body when marking draft as sent (from n8n). Persists thread for outbound."""
+    thread_id: Optional[str] = None
+    gmail_message_id: Optional[str] = None
+

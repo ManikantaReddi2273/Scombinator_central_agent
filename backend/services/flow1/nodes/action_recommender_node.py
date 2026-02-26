@@ -39,20 +39,24 @@ async def action_recommender_node(state: Flow1State) -> Dict:
     impact = state.get("impact", "Low")
     confidence = state.get("confidence", "Missing info")
     
-    # Get pricing policy from brand context (if available)
+    # Get pricing policy from brand context (loaded from Redis cache via orchestrator)
     pricing_policy = ""
     brand_context = state.get("brand_context")
     if brand_context and isinstance(brand_context, dict):
         key_points = brand_context.get("key_points", {})
         if isinstance(key_points, dict):
             pricing_policy = key_points.get("pricing_policy", "")
+            if pricing_policy:
+                logger.info(f"Using brand context pricing policy for action recommendation")
+    else:
+        logger.warning("Brand context not available in state - action recommendation without pricing policy")
     
     # Add pricing policy context if available
     policy_context = ""
     if pricing_policy:
         policy_context = f"\n\nCOMPANY POLICY:\n{pricing_policy}\n\nNOTE: Apply this policy when recommending actions for pricing-related inquiries.\n"
     
-    # Enhanced prompt with clear decision tree
+    # Enhanced prompt with few-shot examples showing decision logic
     prompt = f"""You are an action recommendation system. Based on this email classification, recommend the SINGLE BEST next action.
 
 EMAIL CLASSIFICATION:
@@ -64,70 +68,81 @@ EMAIL CLASSIFICATION:
 {policy_context}
 
 AVAILABLE ACTIONS (choose exactly ONE):
-1. "Reply with template" - Standard automated response using company email template
-2. "Ask for missing information" - Need more details/clarification before responding
+1. "Reply with template" - Standard automated response
+2. "Ask for missing information" - Need more details/clarification
 3. "Schedule meeting" - Requires scheduling a call, demo, or meeting
 4. "Review resume" - For job applications, needs human resume review
-5. "Escalate to human" - Too complex/sensitive for automated response, needs human attention
-6. "Hold/Ignore" - Very low priority, can be deferred or ignored
+5. "Escalate to human" - Too complex/sensitive for automated response
+6. "Hold/Ignore" - Very low priority, can be deferred
 
-DECISION TREE (follow in order, stop at first match):
+DECISION RULES (apply in order, stop at first match):
+1. Legal function → "Escalate to human" (always)
+2. Missing info confidence → "Ask for missing information" (always)
+3. Complaint + (Brand impact OR Immediate urgency) → "Escalate to human"
+4. Objection + Revenue impact → "Escalate to human"
+5. Revenue impact + Immediate urgency → "Escalate to human"
+6. Hiring + Application → "Review resume" (always)
+7. Sales + Scheduling → "Schedule meeting" (always)
+8. Sales + Objection → "Escalate to human"
+9. Support + Complaint → "Escalate to human"
+10. Sales + Inquiry/Follow-up → "Reply with template"
+11. Hiring + Inquiry → "Reply with template"
+12. Support + Inquiry → "Reply with template"
+13. Low impact + Can wait + FAQ → "Hold/Ignore"
+14. Default → "Reply with template"
 
-LEVEL 1: CRITICAL ESCALATIONS (highest priority)
-   ✓ Legal function → "Escalate to human" (always)
-   ✓ Missing info confidence → "Ask for missing information" (always)
-   ✓ Complaint + Brand impact → "Escalate to human" (reputation risk)
-   ✓ Complaint + Immediate urgency → "Escalate to human" (urgent issue)
-   ✓ Objection + Revenue impact → "Escalate to human" (sales risk)
-   ✓ Revenue impact + Immediate urgency → "Escalate to human" (critical opportunity)
+FEW-SHOT EXAMPLES:
 
-LEVEL 2: FUNCTION-SPECIFIC ACTIONS
-   ✓ Hiring + Application → "Review resume" (always for applications)
-   ✓ Sales + Scheduling → "Schedule meeting" (always for scheduling requests)
-   ✓ Sales + Objection → "Escalate to human" (needs human negotiation)
-   ✓ Support + Complaint → "Escalate to human" (customer satisfaction risk)
+Example 1:
+Input: Legal + Inquiry + Soon + Low + Clear
+Reasoning: Legal function → Rule 1 applies
+Output: {{"action": "Escalate to human"}}
 
-LEVEL 3: STANDARD RESPONSES
-   ✓ Sales + Inquiry/Follow-up → "Reply with template"
-   ✓ Hiring + Inquiry → "Reply with template"
-   ✓ Support + Inquiry → "Reply with template"
-   ✓ Marketing + Inquiry → "Reply with template"
-   ✓ Ops + Inquiry → "Reply with template"
+Example 2:
+Input: Sales + Scheduling + Soon + Revenue + Clear
+Reasoning: Sales + Scheduling → Rule 7 applies
+Output: {{"action": "Schedule meeting"}}
 
-LEVEL 4: LOW PRIORITY
-   ✓ Low impact + Can wait + FAQ → "Hold/Ignore"
-   ✓ Admin + Can wait → "Reply with template"
+Example 3:
+Input: Hiring + Application + Can wait + Hiring + Clear
+Reasoning: Hiring + Application → Rule 6 applies
+Output: {{"action": "Review resume"}}
 
-LEVEL 5: DEFAULT
-   ✓ If no match above → "Reply with template"
+Example 4:
+Input: Support + Complaint + Immediate + Brand + Clear
+Reasoning: Complaint + Immediate urgency → Rule 3 applies
+Output: {{"action": "Escalate to human"}}
 
-DECISION EXAMPLES:
+Example 5:
+Input: Sales + Inquiry + Soon + Revenue + Clear
+Reasoning: Sales + Inquiry → Rule 10 applies
+Output: {{"action": "Reply with template"}}
 
-Example 1: Legal + Inquiry + Soon + Low + Clear
-   → Level 1: Legal function → "Escalate to human" ✓
+Example 6:
+Input: Support + FAQ + Can wait + Low + Clear
+Reasoning: Low impact + Can wait + FAQ → Rule 13 applies
+Output: {{"action": "Hold/Ignore"}}
 
-Example 2: Sales + Scheduling + Soon + Revenue + Clear
-   → Level 2: Sales + Scheduling → "Schedule meeting" ✓
+Example 7:
+Input: Sales + Objection + Soon + Revenue + Clear
+Reasoning: Objection + Revenue impact → Rule 4 applies
+Output: {{"action": "Escalate to human"}}
 
-Example 3: Hiring + Application + Can wait + Hiring + Clear
-   → Level 2: Hiring + Application → "Review resume" ✓
+Example 8:
+Input: Admin + Inquiry + Can wait + Low + Clear
+Reasoning: No specific rule matches → Rule 14 (Default) applies
+Output: {{"action": "Reply with template"}}
 
-Example 4: Support + Complaint + Immediate + Brand + Clear
-   → Level 1: Complaint + Immediate → "Escalate to human" ✓
-
-Example 5: Sales + Inquiry + Soon + Revenue + Clear
-   → Level 3: Sales + Inquiry → "Reply with template" ✓
-
-Example 6: Support + FAQ + Can wait + Low + Clear
-   → Level 4: Low impact + FAQ → "Hold/Ignore" ✓
+Example 9:
+Input: Marketing + Inquiry + Soon + Low + Ambiguous
+Reasoning: Missing info confidence → Rule 2 applies
+Output: {{"action": "Ask for missing information"}}
 
 NOW DECIDE FOR THIS EMAIL:
 Function: {function}, Intent: {intent}, Urgency: {urgency}, Impact: {impact}, Confidence: {confidence}
 
-Follow the decision tree above and return the action as JSON:
-{{"action": "<exact_action_text>"}}
-
-Return ONLY the JSON object:"""
+Apply the decision rules and return:
+{{"action": "<exact_action_text>"}}"""
 
     messages = [
         {

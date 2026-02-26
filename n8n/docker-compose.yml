@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "5678:5678"
+    env_file:
+      - .env
     environment:
       # Basic Authentication (Change password!)
       - N8N_BASIC_AUTH_ACTIVE=true
@@ -36,6 +38,12 @@ services:
       - EXECUTIONS_DATA_SAVE_ON_ERROR=all
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
       - EXECUTIONS_DATA_MAX_AGE=168  # Keep execution data for 7 days
+      
+      # Allow workflows to read env vars (required for Update CRM After Send X-API-Key)
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      
+      # API key for backend calls (Update CRM, etc.). Set same value in backend .env as N8N_SERVICE_API_KEY
+      - N8N_SERVICE_API_KEY=${N8N_SERVICE_API_KEY:-CHANGE_ME_SET_SAME_IN_BACKEND_ENV}
       
     volumes:
       # Persist n8n data (workflows, credentials, settings)

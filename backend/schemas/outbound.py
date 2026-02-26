@@ -1,0 +1,78 @@
+"""
+Outbound email schemas
+"""
+from pydantic import BaseModel
+from typing import Optional, Dict, List
+from datetime import datetime
+
+
+class OutboundCreateRequest(BaseModel):
+    """Request to create outbound email"""
+    company_id: str
+    lead_id: str
+    email_type: str = "B2B"  # "B2B" or "B2C"
+    intent: Optional[str] = None  # followup_checkin, schedule_meeting, send_proposal, address_objection
+    trigger_type: str = "manual"  # manual, time_based, calendar, task
+
+
+class B2BLeadResponse(BaseModel):
+    """B2B lead response schema"""
+    Lead_ID: str
+    Institution_Name: Optional[str] = None
+    Contact_Name: Optional[str] = None
+    Role: Optional[str] = None
+    Email: Optional[str] = None
+    Phone: Optional[str] = None
+    City: Optional[str] = None
+    Source: Optional[str] = None
+    Segment: Optional[str] = None
+    Stage: Optional[str] = None
+    Engagement_Level: Optional[str] = None
+    Owner: Optional[str] = None
+    Date_Met: Optional[str] = None
+    Last_Activity_Date: Optional[str] = None
+    Next_Followup_Date: Optional[str] = None
+    Proposal_Value: Optional[str] = None
+    Status: Optional[str] = None
+    Objection_Notes: Optional[str] = None
+    Notes: Optional[str] = None
+    company_id: str  # Added for UI filtering
+
+
+class ActivityResponse(BaseModel):
+    """Activity response schema"""
+    Activity_ID: str
+    Lead_ID: str
+    Activity_Type: str
+    Subject_Title: Optional[str] = None
+    Summary: Optional[str] = None
+    Activity_Date: Optional[str] = None
+    Performed_By: Optional[str] = None
+    Outcome: Optional[str] = None
+    Next_Action: Optional[str] = None
+    Followup_Date: Optional[str] = None
+
+
+class OutboundCreateResponse(BaseModel):
+    """Response after creating outbound email"""
+    email_id: str
+    draft_id: str
+    status: str
+    subject: str
+    recipient: str
+    lead_stage: Optional[str] = None
+
+
+class OutboundUpdateCRMRequest(BaseModel):
+    """Request to update CRM after email sent. LEADS, ACTIVITIES, and TASKS are updated and linked by lead_id."""
+    lead_id: str
+    activity_summary: Optional[str] = None
+    next_followup_date: Optional[str] = None
+    # Optional overrides; if not set, backend uses defaults from playbook and company
+    stage: Optional[str] = None          # e.g. "Email Sent"; default "Email Sent"
+    engagement_level: Optional[str] = None  # High, Medium, Low; default "Medium"
+    owner: Optional[str] = None         # Company name; default from company record
+    status: Optional[str] = None       # e.g. "Active"; default "Active"
+    objection_notes: Optional[str] = None
+    notes: Optional[str] = None
+
