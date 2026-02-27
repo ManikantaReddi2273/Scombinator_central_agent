@@ -1,6 +1,7 @@
 """
 Draft management routes
 """
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -8,13 +9,22 @@ from database import get_db
 from models.admin import Admin
 from models.draft import Draft
 from models.email import Email
-from schemas.draft import DraftResponse, DraftStatusResponse, DraftApproveRequest, DraftSentRequest
+from schemas.draft import (
+    DraftResponse,
+    DraftStatusResponse,
+    DraftApproveRequest,
+    DraftSentRequest,
+    DraftAIEditRequest,
+    DraftAIEditResponse,
+)
+from services.draft_ai_edit import edit_draft_with_ai
 from services.audit_logger import audit_logger_service
 from auth.jwt import get_current_admin
 from datetime import datetime
 from typing import Optional
 import uuid
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drafts", tags=["Drafts"])
 
 
@@ -109,6 +119,7 @@ async def get_pending_drafts(
                 "subject": email.subject,
                 "from_email": email.from_email,
                 "to_email": email.to_email,
+                "email_type": email.email_type,
                 "body": email.body,
                 "priority_score": email.priority_score,
                 "executive_summary": email.executive_summary,
@@ -179,6 +190,7 @@ async def get_draft(
             "subject": email.subject,
             "from_email": email.from_email,
             "to_email": email.to_email,
+            "email_type": email.email_type,
             "body": email.body,
             "priority_score": email.priority_score,
             "executive_summary": email.executive_summary,
@@ -221,6 +233,67 @@ async def get_draft_status(
     )
 
 
+@router.post("/{draft_id}/ai-edit", response_model=DraftAIEditResponse)
+async def ai_edit_draft(
+    draft_id: str,
+    body: DraftAIEditRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """
+    Edit draft with AI based on natural language instruction (admin only).
+    Returns edited subject and body; no persistence until user approves.
+    """
+    result = await db.execute(
+        select(Draft).where(Draft.id == uuid.UUID(draft_id))
+    )
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Draft not found"
+        )
+    if draft.status == "sent":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot edit a draft that has already been sent"
+        )
+    # Use current content from frontend when provided (incremental edits); otherwise use persisted draft
+    subject_base = (body.current_subject or "").strip() or draft.subject
+    body_base = (body.current_body or "").strip() if body.current_body is not None else draft.body
+    if not body_base:
+        body_base = draft.body
+
+    # Load company brand context (Redis cache → Drive) so AI edits adhere to brand guidelines
+    brand_context = None
+    if draft.company_id:
+        try:
+            from services.brand_context_loader import brand_context_loader
+            brand_context = await brand_context_loader.load_all(db, str(draft.company_id))
+        except Exception as e:
+            logger.warning(f"Could not load brand context for draft company {draft.company_id}: {e}. Proceeding without it.")
+
+    try:
+        edited_subject, edited_body = await edit_draft_with_ai(
+            subject=subject_base,
+            body=body_base,
+            instruction=body.instruction,
+            brand_context=brand_context,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.exception("AI edit draft failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI edit failed: {str(e)}"
+        )
+    return DraftAIEditResponse(subject=edited_subject, body=edited_body)
+
+
 @router.post("/{draft_id}/approve")
 async def approve_draft(
     draft_id: str,
@@ -247,7 +320,9 @@ async def approve_draft(
             draft.original_body = draft.body
         draft.body = approve_data.edited_body
         draft.is_edited = True
-    
+    if approve_data.edited_subject is not None and approve_data.edited_subject.strip() != draft.subject:
+        draft.subject = approve_data.edited_subject.strip()
+
     # Approve draft
     draft.status = "approved"
     draft.approved_by = admin.id

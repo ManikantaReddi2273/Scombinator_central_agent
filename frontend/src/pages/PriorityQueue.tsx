@@ -5,6 +5,7 @@ import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { formatDate, getPriorityColor, getStatusColor } from '../lib/utils'
 import { Mail, Building2, Clock, FileText, ExternalLink } from 'lucide-react'
+import { IncomingOutgoingBadge } from '../components/IncomingOutgoingBadge'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -104,12 +105,13 @@ export default function PriorityQueue() {
                     <div className="flex items-start justify-between mb-2">
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-1">{item.subject}</h3>
-                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                        <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
                           <div className="flex items-center gap-1">
                             <Building2 className="w-4 h-4" />
                             {item.company_name}
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <IncomingOutgoingBadge emailType={item.email_type} compact />
                             <Mail className="w-4 h-4" />
                             {item.from_email}
                           </div>

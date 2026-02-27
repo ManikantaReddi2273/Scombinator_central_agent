@@ -1,7 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Badge } from './ui/badge'
 import { formatDate, getPriorityColor } from '../lib/utils'
-import { Mail, Clock, User, Building2, AlertCircle, MessageSquare } from 'lucide-react'
+import { Mail, Clock, Building2, MessageSquare } from 'lucide-react'
+import { IncomingOutgoingBadge } from './IncomingOutgoingBadge'
 
 interface EmailDetailProps {
   email: {
@@ -10,6 +11,7 @@ interface EmailDetailProps {
     from_email: string
     to_email: string
     body: string
+    email_type?: string | null
     priority_score: string | null
     executive_summary: string | null
     function: string | null
@@ -25,6 +27,7 @@ interface EmailDetailProps {
       from_email: string
       created_at: string | null
       was_reply: boolean
+      email_type?: string
     }>
     thread_count?: number
     created_at: string
@@ -65,15 +68,20 @@ export default function EmailDetail({ email, companyName }: EmailDetailProps) {
             </div>
           )}
 
+          {/* Direction: Incoming / Outgoing */}
+          <div className="flex items-center gap-2">
+            <IncomingOutgoingBadge emailType={email.email_type} />
+          </div>
+
           {/* Email Metadata */}
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div className="flex items-center gap-2 text-gray-600">
-              <Mail className="w-4 h-4" />
+              <Mail className="w-4 h-4 shrink-0" />
               <span className="font-medium">From:</span>
               <span>{email.from_email}</span>
             </div>
             <div className="flex items-center gap-2 text-gray-600">
-              <Mail className="w-4 h-4" />
+              <Mail className="w-4 h-4 shrink-0" />
               <span className="font-medium">To:</span>
               <span>{email.to_email}</span>
             </div>
@@ -130,8 +138,9 @@ export default function EmailDetail({ email, companyName }: EmailDetailProps) {
                         className="bg-gray-50 p-3 rounded-md border border-gray-200"
                       >
                         <div className="flex items-start justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <Mail className="w-3 h-3 text-gray-500" />
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <IncomingOutgoingBadge emailType={prevEmail.email_type} />
+                            <Mail className="w-3 h-3 text-gray-500 shrink-0" />
                             <span className="text-xs font-medium text-gray-700">
                               {prevEmail.from_email}
                             </span>

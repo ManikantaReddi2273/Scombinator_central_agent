@@ -36,6 +36,20 @@ class DraftApproveRequest(BaseModel):
     """Draft approval request"""
     draft_id: UUID
     edited_body: Optional[str] = None  # If admin edited the draft
+    edited_subject: Optional[str] = None  # If admin or AI edited the subject
+
+
+class DraftAIEditRequest(BaseModel):
+    """Request for AI-assisted draft edit. Use current_subject/current_body for incremental edits (latest accepted content)."""
+    instruction: str  # Natural language editing instruction
+    current_subject: Optional[str] = None  # If provided, use as base instead of DB draft (for incremental edits)
+    current_body: Optional[str] = None  # If provided, use as base instead of DB draft (for incremental edits)
+
+
+class DraftAIEditResponse(BaseModel):
+    """Response from AI edit: edited subject and body"""
+    subject: str
+    body: str
 
 
 class DraftSentRequest(BaseModel):

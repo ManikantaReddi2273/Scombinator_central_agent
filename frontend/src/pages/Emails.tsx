@@ -4,6 +4,7 @@ import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { formatDate, getPriorityColor } from '../lib/utils'
 import { Mail, Building2, Filter } from 'lucide-react'
+import { IncomingOutgoingBadge } from '../components/IncomingOutgoingBadge'
 import { useState } from 'react'
 import { Button } from '../components/ui/button'
 
@@ -99,19 +100,20 @@ export default function Emails() {
               <CardContent className="p-6">
                 <div className="flex items-start gap-4">
                   <div
-                    className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold ${getPriorityColor(email.priority_score)}`}
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold shrink-0 ${getPriorityColor(email.priority_score)}`}
                   >
                     {email.priority_score}
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between mb-2">
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-1">{email.subject}</h3>
-                        <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
-                          <div className="flex items-center gap-1">
-                            <Mail className="w-4 h-4" />
+                        <div className="flex items-center gap-3 text-sm text-gray-600 mb-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1.5">
+                            <IncomingOutgoingBadge emailType={email.email_type} compact />
+                            <Mail className="w-4 h-4 shrink-0" />
                             {email.from_email}
-                          </div>
+                          </span>
                           <span>{formatDate(email.created_at)}</span>
                         </div>
                       </div>

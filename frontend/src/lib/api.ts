@@ -77,9 +77,11 @@ export const draftsAPI = {
     api.get('/api/drafts/pending', { params }),
   get: (id: string) => api.get(`/api/drafts/${id}`),
   getStatus: (id: string) => api.get(`/api/drafts/${id}/status`),
-  approve: (id: string, data?: { edited_body?: string }) =>
+  approve: (id: string, data?: { edited_body?: string; edited_subject?: string }) =>
     api.post(`/api/drafts/${id}/approve`, { draft_id: id, ...data }),
   reject: (id: string) => api.post(`/api/drafts/${id}/reject`),
+  aiEdit: (draftId: string, data: { instruction: string; current_subject?: string; current_body?: string }) =>
+    api.post<{ subject: string; body: string }>(`/api/drafts/${draftId}/ai-edit`, data),
 }
 
 export const dashboardAPI = {

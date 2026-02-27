@@ -76,7 +76,8 @@ class Flow1Orchestrator:
                     "body": body_text,
                     "from_email": email.from_email,
                     "created_at": email.created_at.isoformat() if email.created_at else None,
-                    "was_reply": email.subject.startswith("Re:") or email.subject.startswith("RE:")
+                    "was_reply": email.subject.startswith("Re:") or email.subject.startswith("RE:"),
+                    "email_type": (email.email_type or "inbound").strip().lower(),
                 })
             
             logger.info(f"Loaded {len(history)} previous emails from thread {thread_id}")

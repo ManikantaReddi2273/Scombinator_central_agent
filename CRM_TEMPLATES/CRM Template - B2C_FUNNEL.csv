@@ -1,2 +1,2 @@
-B2C_Lead_ID,Name,Email,Phone,Persona,City,Source,Campaign,Optin_Date,Funnel_Stage,Last_Activity_Date,Next_Followup_Date,Engagement_Score,Demo_Booked,Converted,Notes
-B2C-001,Ananya Reddy,ananya@example.com,+91-9000000000,Parent of 9th grader (career confusion),Hyderabad,Instagram,Career Clarity Webinar,2026-02-10,Engaged,2026-02-17,2026-02-20,72,Yes,No,Clicked link twice; asked for pricing on WhatsApp
+B2C_Lead_ID,Name,Email,Source,Campaign,Funnel_Stage,Last_Activity_Date,Next_Followup_Date,Demo_Booked,Notes,Next_Action,Campaign_id
+B2C-001,Ananya,ananya@example.com,Instagram,Career Clarity Webinar,Engaged,2026-02-17,2026-02-20,Yes,Clicked link twice; asked for pricing on WhatsApp,,

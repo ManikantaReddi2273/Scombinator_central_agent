@@ -5,7 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils'
-import { Check, X, Eye, Edit, Building2, Mail } from 'lucide-react'
+import { Check, X, Eye, Edit, Building2, Mail, Sparkles } from 'lucide-react'
+import { IncomingOutgoingBadge } from '../components/IncomingOutgoingBadge'
+import DraftAIEditModal from '../components/DraftAIEditModal'
 import { useState, useEffect } from 'react'
 import EmailDetail from '../components/EmailDetail'
 
@@ -14,6 +16,8 @@ export default function Drafts() {
   const draftIdFromUrl = searchParams.get('draft')
   const [selectedDraft, setSelectedDraft] = useState<string | null>(draftIdFromUrl || null)
   const [editedBody, setEditedBody] = useState('')
+  const [editedSubject, setEditedSubject] = useState('')
+  const [showAIEditModal, setShowAIEditModal] = useState(false)
   const queryClient = useQueryClient()
 
   // Open draft from URL (e.g. after "Create Draft" from B2B Outbound)
@@ -36,8 +40,8 @@ export default function Drafts() {
   })
 
   const approveMutation = useMutation({
-    mutationFn: (data: { id: string; edited_body?: string }) =>
-      draftsAPI.approve(data.id, { edited_body: data.edited_body }),
+    mutationFn: (data: { id: string; edited_body?: string; edited_subject?: string }) =>
+      draftsAPI.approve(data.id, { edited_body: data.edited_body, edited_subject: data.edited_subject }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['drafts'] })
       queryClient.invalidateQueries({ queryKey: ['draft', selectedDraft] })
@@ -57,10 +61,11 @@ export default function Drafts() {
   const approvedDrafts = drafts?.filter((d: any) => d.status === 'approved') || []
   const [showEmailDetail, setShowEmailDetail] = useState(false)
 
-  // Sync edited body when selected draft (or its data) changes
+  // Sync edited body and subject when selected draft (or its data) changes
   useEffect(() => {
     if (selectedDraftData?.body != null) setEditedBody(selectedDraftData.body)
-  }, [selectedDraft, selectedDraftData?.body])
+    if (selectedDraftData?.subject != null) setEditedSubject(selectedDraftData.subject)
+  }, [selectedDraft, selectedDraftData?.body, selectedDraftData?.subject])
 
   return (
     <div className="space-y-6">
@@ -89,22 +94,26 @@ export default function Drafts() {
                     onClick={() => {
                       setSelectedDraft(draft.id)
                       setEditedBody(draft.body)
+                      setEditedSubject(draft.subject)
                     }}
                   >
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-start justify-between gap-2 mb-2">
                             <h3 className="font-semibold text-gray-900">{draft.subject}</h3>
-                            {draft.email?.priority_score && (
-                              <div
-                                className={`px-2 py-1 rounded text-white text-xs font-bold ${getPriorityColor(
-                                  draft.email.priority_score
-                                )}`}
-                              >
-                                {draft.email.priority_score}
-                              </div>
-                            )}
+                            <span className="flex items-center gap-2 shrink-0">
+                              <IncomingOutgoingBadge emailType={draft.email?.email_type} compact />
+                              {draft.email?.priority_score && (
+                                <div
+                                  className={`px-2 py-1 rounded text-white text-xs font-bold ${getPriorityColor(
+                                    draft.email.priority_score
+                                  )}`}
+                                >
+                                  {draft.email.priority_score}
+                                </div>
+                              )}
+                            </span>
                           </div>
                           
                           {/* Executive Summary */}
@@ -225,13 +234,29 @@ export default function Drafts() {
               {/* Draft Editor */}
               <Card className="bg-white border-gray-200 sticky top-20 shadow-lg">
                 <CardHeader>
-                  <CardTitle className="text-gray-900">Edit & Approve</CardTitle>
-                  <CardDescription>Review and edit the draft before approval</CardDescription>
-                  {selectedDraftData.template_used && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Template: {selectedDraftData.template_used}
-                    </p>
-                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <CardTitle className="text-gray-900">Edit & Approve</CardTitle>
+                      <CardDescription>Review and edit the draft before approval</CardDescription>
+                      {selectedDraftData.template_used && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Template: {selectedDraftData.template_used}
+                        </p>
+                      )}
+                    </div>
+                    {selectedDraftData.status !== 'sent' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => setShowAIEditModal(true)}
+                      >
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        Edit with AI
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
@@ -240,7 +265,7 @@ export default function Drafts() {
                     </label>
                     <input
                       type="text"
-                      value={selectedDraftData.subject}
+                      value={editedSubject || selectedDraftData.subject || ''}
                       readOnly
                       className="w-full px-3 py-2 rounded-md bg-[#EAEFEF] border border-gray-300 text-gray-900 text-sm"
                     />
@@ -252,8 +277,13 @@ export default function Drafts() {
                     <textarea
                       value={editedBody}
                       onChange={(e) => setEditedBody(e.target.value)}
+                      readOnly={selectedDraftData.status === 'sent'}
                       rows={16}
-                      className="w-full px-3 py-2 rounded-md bg-white border border-gray-300 text-gray-900 text-sm resize-y min-h-[200px] max-h-[500px] focus:outline-none focus:ring-2 focus:ring-gray-400 overflow-y-auto"
+                      className={`w-full px-3 py-2 rounded-md border text-gray-900 text-sm resize-y min-h-[200px] max-h-[500px] overflow-y-auto ${
+                        selectedDraftData.status === 'sent'
+                          ? 'bg-gray-50 border-gray-200 cursor-default'
+                          : 'bg-white border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400'
+                      }`}
                       style={{ wordWrap: 'break-word', whiteSpace: 'pre-wrap' }}
                     />
                   </div>
@@ -263,31 +293,55 @@ export default function Drafts() {
                       This draft has been edited
                     </div>
                   )}
-                  <div className="flex gap-2">
-                    <Button
-                      className="flex-1 bg-green-600 hover:bg-green-700"
-                      onClick={() =>
-                        approveMutation.mutate({
-                          id: selectedDraftData.id,
-                          edited_body: editedBody !== selectedDraftData.body ? editedBody : undefined,
-                        })
-                      }
-                      disabled={approveMutation.isPending}
-                    >
-                      <Check className="w-4 h-4 mr-2" />
-                      Approve
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => rejectMutation.mutate(selectedDraftData.id)}
-                      disabled={rejectMutation.isPending}
-                    >
-                      <X className="w-4 h-4 mr-2" />
-                      Reject
-                    </Button>
-                  </div>
+                  {selectedDraftData.status === 'sent' ? (
+                    <div className="rounded-md bg-gray-100 border border-gray-200 px-4 py-3 text-sm text-gray-700 flex items-center gap-2">
+                      <Check className="w-5 h-5 text-green-600 shrink-0" />
+                      <span>Already reviewed and sent</span>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 bg-green-600 hover:bg-green-700"
+                        onClick={() =>
+                          approveMutation.mutate({
+                            id: selectedDraftData.id,
+                            edited_body: editedBody !== selectedDraftData.body ? editedBody : undefined,
+                            edited_subject:
+                              editedSubject !== selectedDraftData.subject ? editedSubject : undefined,
+                          })
+                        }
+                        disabled={approveMutation.isPending}
+                      >
+                        <Check className="w-4 h-4 mr-2" />
+                        Approve
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => rejectMutation.mutate(selectedDraftData.id)}
+                        disabled={rejectMutation.isPending}
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Reject
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
+
+              {selectedDraftData.status !== 'sent' && (
+                <DraftAIEditModal
+                  isOpen={showAIEditModal}
+                  onClose={() => setShowAIEditModal(false)}
+                  draftId={selectedDraftData.id}
+                  currentSubject={editedSubject}
+                  currentBody={editedBody}
+                  onKeepChanges={(subject, body) => {
+                    setEditedSubject(subject)
+                    setEditedBody(body)
+                    setShowAIEditModal(false)
+                  }}
+                />
+              )}
             </>
           ) : (
             <Card className="bg-white border-gray-200">
