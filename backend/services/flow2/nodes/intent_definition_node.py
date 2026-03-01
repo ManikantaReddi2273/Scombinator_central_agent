@@ -32,6 +32,17 @@ async def intent_definition_node(state: Flow2State) -> Dict:
     activities = state.get("activities", [])
     email_type = state.get("email_type", "B2B")
     
+    # B2C manual trigger: treat as initial outreach (post-context email)
+    if email_type and email_type.strip().lower() == "b2c" and trigger_type == "manual":
+        outbound_intent = "initial_outreach" if not user_intent else (
+            "followup_checkin" if (user_intent or "").lower().replace(" ", "_") in ("followup", "followup_checkin") else "initial_outreach"
+        )
+        logger.info(f"B2C manual trigger: outbound_intent={outbound_intent}")
+        return {
+            "outbound_intent": outbound_intent,
+            "email_type": email_type
+        }
+    
     # If user provided intent (manual trigger), use it
     if trigger_type == "manual" and user_intent:
         intent_map = {
@@ -39,6 +50,7 @@ async def intent_definition_node(state: Flow2State) -> Dict:
             "schedule_meeting": "schedule_meeting",
             "send_proposal": "send_proposal",
             "address_objection": "address_objection",
+            "initial_outreach": "initial_outreach",
             "followup": "followup_checkin",
             "meeting": "schedule_meeting",
             "proposal": "send_proposal",
@@ -52,6 +64,14 @@ async def intent_definition_node(state: Flow2State) -> Dict:
         logger.info(f"Using user-provided intent: {outbound_intent}")
         return {
             "outbound_intent": outbound_intent,
+            "email_type": email_type
+        }
+    
+    # B2C time_based: follow-up
+    if email_type and email_type.strip().lower() == "b2c" and trigger_type == "time_based":
+        logger.info("B2C time_based trigger: followup_checkin")
+        return {
+            "outbound_intent": "followup_checkin",
             "email_type": email_type
         }
     

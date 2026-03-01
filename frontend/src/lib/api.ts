@@ -81,7 +81,7 @@ export const draftsAPI = {
     api.post(`/api/drafts/${id}/approve`, { draft_id: id, ...data }),
   reject: (id: string) => api.post(`/api/drafts/${id}/reject`),
   aiEdit: (draftId: string, data: { instruction: string; current_subject?: string; current_body?: string }) =>
-    api.post<{ subject: string; body: string }>(`/api/drafts/${draftId}/ai-edit`, data),
+    api.post<{ subject: string; body: string }>(`/api/drafts/${draftId}/ai-edit`, data, { timeout: 60000 }),
 }
 
 export const dashboardAPI = {
@@ -91,6 +91,8 @@ export const dashboardAPI = {
 export const outboundAPI = {
   getB2BLeads: (companyId: string) =>
     api.get('/api/outbound/b2b/leads', { params: { company_id: companyId } }),
+  getB2CLeads: (companyId: string) =>
+    api.get('/api/outbound/b2c/leads', { params: { company_id: companyId } }),
   getLeadActivities: (companyId: string, leadId: string) =>
     api.get(`/api/outbound/b2b/leads/${leadId}/activities`, { params: { company_id: companyId } }),
   createOutboundEmail: (data: {

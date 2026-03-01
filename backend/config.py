@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o"  # Use GPT-4o for best quality, can override in .env
+    # Optional faster model for "Edit with AI" only (e.g. gpt-4o-mini). If set, draft edit uses this for lower latency.
+    OPENAI_DRAFT_EDIT_MODEL: Optional[str] = None
     
     # Business timezone for CRM dates (LEADS, ACTIVITIES, TASKS). DB remains UTC.
     APP_TIMEZONE: str = "Asia/Kolkata"

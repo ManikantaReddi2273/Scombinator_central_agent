@@ -10,6 +10,7 @@ import {
   Menu,
   X,
   Send,
+  Users,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '../components/ui/button'
@@ -30,6 +31,7 @@ export default function DashboardLayout() {
     { to: '/drafts', icon: FileText, label: 'Drafts' },
     { to: '/emails', icon: Mail, label: 'Emails' },
     { to: '/outbound/b2b', icon: Send, label: 'B2B Outbound' },
+    { to: '/outbound/b2c', icon: Users, label: 'B2C Outreach' },
     { to: '/companies', icon: Building2, label: 'Companies' },
   ]
 

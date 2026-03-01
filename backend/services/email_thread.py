@@ -1,12 +1,12 @@
 """
-Helpers for email threading: resolve lead_id from thread root (outbound B2B).
-Used so replies in an outbound B2B thread can update CRM (LEADS/ACTIVITIES/TASKS).
+Helpers for email threading: resolve lead_id and lead_source from thread root (outbound B2B/B2C).
+Used so replies in an outbound thread can update CRM (LEADS/B2C_FUNNEL, ACTIVITIES, TASKS).
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import select
@@ -17,32 +17,41 @@ from models.email import Email
 logger = logging.getLogger(__name__)
 
 
-async def get_lead_id_from_thread_root(
+def _parse_recipient_context(rc) -> Tuple[Optional[str], Optional[str]]:
+    """Parse recipient_context (dict or JSON str) to (lead_id, lead_source)."""
+    if not rc:
+        return (None, None)
+    if isinstance(rc, str):
+        try:
+            rc = json.loads(rc)
+        except Exception:
+            return (None, None)
+    if not isinstance(rc, dict):
+        return (None, None)
+    lead_id = (rc.get("lead_id") or rc.get("Lead_ID") or "").strip() or None
+    lead_source = (rc.get("lead_source") or "").strip().lower() or None
+    return (lead_id, lead_source)
+
+
+async def get_lead_id_and_source_from_thread_root(
     db: AsyncSession,
     company_id: str,
     thread_id: str,
-) -> Optional[str]:
+) -> Tuple[Optional[str], Optional[str]]:
     """
-    Return lead_id from the thread's root (oldest) email if that email is outbound.
-    Used to attach lead context to inbound replies in a B2B thread so CRM can be updated.
-
-    Args:
-        db: Database session
-        company_id: Company ID (str or UUID)
-        thread_id: Gmail thread_id
+    Return (lead_id, lead_source) from the thread's root (oldest) email if that email is outbound.
+    lead_source is "b2b" or "b2c" from recipient_context; default "b2b" if missing.
 
     Returns:
-        lead_id from root email's recipient_context if root is outbound; else None
+        (lead_id, lead_source) from root email's recipient_context if root is outbound; else (None, None)
     """
     if not thread_id or not (company_id or "").strip():
-        return None
+        return (None, None)
     try:
         company_uuid = UUID(company_id) if isinstance(company_id, str) else company_id
     except (ValueError, TypeError):
-        return None
-
+        return (None, None)
     try:
-        # Oldest email in thread (by created_at) is the root
         result = await db.execute(
             select(Email)
             .where(
@@ -54,24 +63,32 @@ async def get_lead_id_from_thread_root(
         )
         root = result.scalar_one_or_none()
         if not root:
-            return None
+            return (None, None)
         if (getattr(root, "email_type", None) or "").strip().lower() != "outbound":
-            return None
-        rc = root.recipient_context
-        if not rc:
-            return None
-        if isinstance(rc, dict):
-            return (rc.get("lead_id") or "").strip() or None
-        if isinstance(rc, str):
-            try:
-                data = json.loads(rc)
-                return (data.get("lead_id") or "").strip() or None
-            except Exception:
-                return None
-        return None
+            return (None, None)
+        lead_id, lead_source = _parse_recipient_context(root.recipient_context)
+        if not lead_source:
+            lead_source = "b2b"
+        return (lead_id, lead_source)
     except Exception as e:
-        logger.warning("get_lead_id_from_thread_root failed: %s", e)
-        return None
+        logger.warning("get_lead_id_and_source_from_thread_root failed: %s", e)
+        return (None, None)
+
+
+async def get_lead_id_from_thread_root(
+    db: AsyncSession,
+    company_id: str,
+    thread_id: str,
+) -> Optional[str]:
+    """
+    Return lead_id from the thread's root (oldest) email if that email is outbound.
+    Used to attach lead context to inbound replies so CRM can be updated.
+
+    Returns:
+        lead_id from root email's recipient_context if root is outbound; else None
+    """
+    lead_id, _ = await get_lead_id_and_source_from_thread_root(db, company_id, thread_id)
+    return lead_id
 
 
 async def get_thread_id_for_lead_outbound(

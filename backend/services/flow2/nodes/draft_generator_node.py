@@ -103,6 +103,8 @@ async def draft_generator_node(state: Flow2State) -> Dict:
     template_content = state.get("template_content")
     required_variables = state.get("required_variables", {})
     brand_context = state.get("brand_context")
+    email_type = (state.get("email_type") or "B2B").strip().lower()
+    is_b2c = email_type == "b2c"
     
     # Get brand context components (loaded from Redis cache via orchestrator)
     # Brand context structure: {"full": {...}, "key_points": {...}}
@@ -137,6 +139,9 @@ async def draft_generator_node(state: Flow2State) -> Dict:
     days_since_activity = recipient_context.get("days_since_activity")
     objection_notes = recipient_context.get("objection_notes", "")
     notes = recipient_context.get("notes", "")
+    campaign = recipient_context.get("campaign", "")
+    campaign_id = recipient_context.get("campaign_id", "")
+    source = recipient_context.get("source", "")
     
     # Build last activity context
     last_activity_text = ""
@@ -165,7 +170,22 @@ async def draft_generator_node(state: Flow2State) -> Dict:
     
     # Build intent-specific guidance
     intent_guidance = ""
-    if outbound_intent == "followup_checkin":
+    if is_b2c and outbound_intent == "initial_outreach":
+        intent_guidance = """
+INTENT: B2C Initial Outreach (post-context)
+- This person commented on a social post (e.g. LinkedIn/Instagram) with their name and email
+- Reference the SPECIFIC post/campaign they commented on (use Campaign and Notes below)
+- Thank them for their interest; keep it warm and relevant to that post
+- Invite them to take the next step (e.g. try the product, get more info)
+- Follow brand voice; keep it concise and human"""
+    elif is_b2c and outbound_intent == "followup_checkin":
+        intent_guidance = """
+INTENT: B2C Follow-up
+- They haven't replied to our first (or previous) email about the post/campaign
+- Gently reference the post/campaign again; one new angle or reminder
+- Keep tone from brand context; follow-up format from playbooks
+- Short and friendly"""
+    elif outbound_intent == "followup_checkin":
         intent_guidance = """
 INTENT: Follow-up Check-in
 - Check in on previous interaction
@@ -200,8 +220,20 @@ INTENT: Address Objection
 - Don't be pushy
 - Suggest next steps if appropriate"""
     
+    # B2C post context (the post/campaign they commented on)
+    b2c_post_context = ""
+    if is_b2c and (campaign or notes):
+        b2c_post_context = f"""
+POST/CAMPAIGN THEY COMMENTED ON (reference this in the email):
+- Campaign: {campaign or "(see notes)"}
+- Campaign ID: {campaign_id or ""}
+- Notes: {notes or ""}
+- Source: {source or ""}
+"""
+    
     # Enhanced prompt with few-shot examples for outbound emails
-    prompt = f"""You are a professional email writer for outbound B2B communications. Write a COMPLETE, DETAILED outbound email that is personalized, professional, and effective.
+    channel_label = "B2C (social post follow-up)" if is_b2c else "B2B"
+    prompt = f"""You are a professional email writer for outbound {channel_label} communications. Write a COMPLETE, DETAILED outbound email that is personalized, professional, and effective.
 
 RECIPIENT INFORMATION:
 - Name: {recipient_name}
@@ -209,6 +241,7 @@ RECIPIENT INFORMATION:
 - Role: {recipient_role}
 - Lead Stage: {lead_stage}
 - Engagement Level: {engagement_level}
+{b2c_post_context}
 {last_activity_text}
 {objection_notes if objection_notes else ""}
 {notes if notes else ""}
@@ -334,7 +367,11 @@ Return ONLY the email body text, nothing else:"""
         # Generate subject line
         subject_prefix = "Re: " if last_activity and last_activity.get("subject") else ""
         
-        if outbound_intent == "followup_checkin":
+        if is_b2c and outbound_intent == "initial_outreach":
+            draft_subject = f"Thanks for your interest – {campaign or 'following up'}"
+        elif is_b2c and outbound_intent == "followup_checkin":
+            draft_subject = f"{subject_prefix}Quick follow-up – {campaign or 'your interest'}"
+        elif outbound_intent == "followup_checkin":
             draft_subject = f"{subject_prefix}Following up on {recipient_company}"
         elif outbound_intent == "schedule_meeting":
             draft_subject = f"Quick call to discuss {recipient_company}'s needs"

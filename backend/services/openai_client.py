@@ -30,28 +30,31 @@ class OpenAIClient:
         temperature: float = 0.7,
         max_tokens: int = 1000,
         response_format: Optional[Dict] = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        model: Optional[str] = None,
     ) -> str:
         """
         Make async chat completion request with retry logic
-        
+
         Args:
             messages: List of message dicts with "role" and "content"
             temperature: Sampling temperature (0-1)
             max_tokens: Maximum tokens in response
             response_format: Optional JSON schema for structured output (e.g., {"type": "json_object"})
             max_retries: Maximum number of retry attempts for transient errors
-        
+            model: Optional model override (e.g. gpt-4o-mini for faster draft edit)
+
         Returns:
             Response text content
         """
         last_error = None
-        
+        use_model = model or self.model
+
         for attempt in range(max_retries):
             try:
                 # Prepare request parameters
                 request_params = {
-                    "model": self.model,
+                    "model": use_model,
                     "messages": messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens
@@ -118,33 +121,46 @@ class OpenAIClient:
     
     def parse_json_response(self, response: str) -> Dict:
         """
-        Parse JSON response, handling markdown code blocks
-        
-        Args:
-            response: Raw response string that may contain JSON
-        
-        Returns:
-            Parsed JSON dictionary
+        Parse JSON response, handling markdown code blocks and extra text.
+        Tries strict parse first, then extracts first {...} object if needed.
         """
+        if response is None:
+            raise ValueError("Empty response from OpenAI")
+        raw = response.strip()
+        if not raw:
+            raise ValueError("Empty response from OpenAI")
+
+        def try_parse(s: str) -> Dict:
+            s = s.strip()
+            if not s:
+                raise json.JSONDecodeError("empty", s, 0)
+            return json.loads(s)
+
         try:
-            # Remove markdown code blocks if present
-            cleaned = response.strip()
+            cleaned = raw
             if cleaned.startswith("```json"):
                 cleaned = cleaned[7:]
             elif cleaned.startswith("```"):
                 cleaned = cleaned[3:]
-            
             if cleaned.endswith("```"):
                 cleaned = cleaned[:-3]
-            
             cleaned = cleaned.strip()
-            
-            # Parse JSON
-            return json.loads(cleaned)
+            return try_parse(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: find first { and last } and parse that substring (resilient to leading/trailing text)
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                return try_parse(raw[start : end + 1])
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {str(e)}")
-            logger.error(f"Response was: {response[:200]}")
+            logger.error(f"Response was: {response[:500]}")
             raise ValueError(f"Invalid JSON response from OpenAI: {str(e)}")
+
+        raise ValueError("No JSON object found in response")
 
 
 # Singleton instance

@@ -1,14 +1,13 @@
 """
-Record lead-replied in CRM when an inbound email is a reply in an outbound B2B thread.
-Updates ACTIVITIES (Lead Replied), LEADS (Last_Activity_Date, Stage), and TASKS
-(mark follow-up tasks Completed, create Review lead reply task).
+Record lead-replied in CRM when an inbound email is a reply in an outbound B2B or B2C thread.
+Updates ACTIVITIES (Lead Replied), LEADS or B2C_FUNNEL (Stage=Replied, dates), and TASKS.
 
-Only B2B threads: lead_id is resolved from the thread root; the root must be an outbound
-email. Normal inbound emails and replies in non-B2B threads do not update CRM (get_lead_id
-returns None when root is not outbound).
+lead_id and lead_source are resolved from email.recipient_context or from thread root.
+B2B: update LEADS; B2C: update B2C_FUNNEL. ACTIVITIES and TASKS use lead_id for both.
 """
+import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from time_utils import today_ist_str, now_ist
@@ -19,19 +18,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.email import Email
 from models.company import Company
 from services.crm_loader import crm_loader_service
-from services.email_thread import get_lead_id_from_thread_root
+from services.email_thread import get_lead_id_and_source_from_thread_root
 
 logger = logging.getLogger(__name__)
 
 
+def _parse_rc(rc) -> tuple:
+    """Return (lead_id, lead_source) from recipient_context."""
+    if not rc:
+        return ("", None)
+    if isinstance(rc, str):
+        try:
+            rc = json.loads(rc)
+        except Exception:
+            return ("", None)
+    if not isinstance(rc, dict):
+        return ("", None)
+    lead_id = (rc.get("lead_id") or rc.get("Lead_ID") or "").strip()
+    lead_source = (rc.get("lead_source") or "").strip().lower() or None
+    return (lead_id, lead_source)
+
+
 async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> None:
     """
-    When an inbound email is a reply in an outbound B2B thread, update CRM at receive time:
-    - ACTIVITIES: log "Lead Replied" with subject, summary, outcome "Reply received", next action "Review and send reply".
-    - LEADS: update Last_Activity_Date and Next_Followup_Date to today, Stage to "Replied".
-    - TASKS: mark pending "Check if lead respond" / "Follow-up Email" tasks as Completed; create task "Review lead reply - send response".
-    Lead ID is taken from email.recipient_context (set by Flow 1 when saving reply) or resolved from thread root.
-    Non-blocking: logs a warning on failure.
+    When an inbound email is a reply in an outbound B2B or B2C thread, update CRM at receive time:
+    - ACTIVITIES: log "Lead Replied".
+    - B2B: LEADS (Last_Activity_Date, Next_Followup_Date, Stage=Replied).
+    - B2C: B2C_FUNNEL (same fields).
+    - TASKS: mark follow-up tasks Completed; create "Review lead reply" task.
+    lead_id and lead_source from email.recipient_context or thread root. Non-blocking on failure.
     """
     try:
         result = await db.execute(
@@ -41,21 +56,13 @@ async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> 
         if not email or not email.thread_id:
             return
 
-        lead_id = None
-        rc = email.recipient_context
-        if rc:
-            if isinstance(rc, dict):
-                lead_id = (rc.get("lead_id") or rc.get("Lead_ID") or "").strip()
-            elif isinstance(rc, str):
-                try:
-                    import json
-                    data = json.loads(rc)
-                    lead_id = (data.get("lead_id") or data.get("Lead_ID") or "").strip()
-                except Exception:
-                    pass
+        lead_id, lead_source = _parse_rc(email.recipient_context)
         if not lead_id:
-            lead_id = await get_lead_id_from_thread_root(db, str(email.company_id), email.thread_id)
-            lead_id = (lead_id or "").strip() if lead_id else ""
+            lead_id, lead_source = await get_lead_id_and_source_from_thread_root(
+                db, str(email.company_id), email.thread_id
+            )
+            lead_id = (lead_id or "").strip()
+            lead_source = (lead_source or "b2b").strip().lower()
         if not lead_id:
             return
 
@@ -71,8 +78,9 @@ async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> 
         if body_snippet:
             summary = f"Lead replied to our email. Subject: {subject or '(no subject)'}. Snippet: {body_snippet}... Review and send response."
         activity_date = email.created_at
+        today_str = today_ist_str("%Y-%m-%d")
 
-        # 1. ACTIVITIES: log "Lead Replied" with clear wording
+        # 1. ACTIVITIES: log "Lead Replied" (same for B2B and B2C)
         await crm_loader_service.record_lead_replied(
             db=db,
             company_id=str(email.company_id),
@@ -84,25 +92,39 @@ async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> 
             next_action="Review and send reply",
         )
 
-        today_str = today_ist_str("%Y-%m-%d")
+        is_b2c = lead_source == "b2c"
 
-        # 2. LEADS: Last_Activity_Date, Next_Followup_Date (today = follow up now), Stage = "Replied"
-        try:
-            await crm_loader_service.update_lead_activity_dates(
-                db=db,
-                company_id=str(email.company_id),
-                lead_id=str(lead_id),
-                last_activity_date=today_str,
-                next_followup_date=today_str,
-            )
-            await crm_loader_service.update_lead_stage(
-                db=db,
-                company_id=str(email.company_id),
-                lead_id=str(lead_id),
-                new_stage="Replied",
-            )
-        except Exception as e:
-            logger.warning("Could not update LEADS for lead replied (lead_id=%s): %s", lead_id, e)
+        if is_b2c:
+            # 2a. B2C_FUNNEL: Stage=Replied, Last_Activity_Date, Next_Followup_Date
+            try:
+                await crm_loader_service.update_b2c_funnel_lead_replied(
+                    db=db,
+                    company_id=str(email.company_id),
+                    b2c_lead_id=str(lead_id),
+                    last_activity_date=today_str,
+                    next_followup_date=today_str,
+                    stage="Replied",
+                )
+            except Exception as e:
+                logger.warning("Could not update B2C_FUNNEL for lead replied (lead_id=%s): %s", lead_id, e)
+        else:
+            # 2b. LEADS: Last_Activity_Date, Next_Followup_Date, Stage = "Replied"
+            try:
+                await crm_loader_service.update_lead_activity_dates(
+                    db=db,
+                    company_id=str(email.company_id),
+                    lead_id=str(lead_id),
+                    last_activity_date=today_str,
+                    next_followup_date=today_str,
+                )
+                await crm_loader_service.update_lead_stage(
+                    db=db,
+                    company_id=str(email.company_id),
+                    lead_id=str(lead_id),
+                    new_stage="Replied",
+                )
+            except Exception as e:
+                logger.warning("Could not update LEADS for lead replied (lead_id=%s): %s", lead_id, e)
 
         # 3. TASKS: mark "Check if lead respond" / "Follow-up Email" as Completed; create "Review lead reply" task
         try:
@@ -129,6 +151,7 @@ async def record_lead_replied_if_applicable(db: AsyncSession, email_id: str) -> 
         except Exception as e:
             logger.warning("Could not create Review lead reply task (lead_id=%s): %s", lead_id, e)
 
-        logger.info("CRM updated for lead replied: lead_id=%s (ACTIVITIES, LEADS, TASKS)", lead_id)
+        sheet = "B2C_FUNNEL" if is_b2c else "LEADS"
+        logger.info("CRM updated for lead replied: lead_id=%s (ACTIVITIES, %s, TASKS)", lead_id, sheet)
     except Exception as e:
         logger.warning("Could not record lead replied in CRM: %s", e)

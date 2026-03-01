@@ -14,6 +14,7 @@ from schemas.outbound import (
     OutboundCreateRequest,
     OutboundCreateResponse,
     B2BLeadResponse,
+    B2CLeadResponse,
     ActivityResponse,
     OutboundUpdateCRMRequest
 )
@@ -130,6 +131,42 @@ async def get_b2b_leads(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error loading leads: {str(e)}"
+        )
+
+
+@router.get("/b2c/leads", response_model=List[dict])
+async def get_b2c_leads(
+    company_id: str = Query(..., description="Company ID"),
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin)
+):
+    """
+    Get all B2C leads from CRM workbook, B2C_FUNNEL worksheet (admin only).
+    """
+    try:
+        company_id = clean_company_id(company_id)
+        company = await tenant_service.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Company not found"
+            )
+        if not company.encrypted_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Company OAuth not connected"
+            )
+        leads = await crm_loader_service.get_b2c_leads(db, company_id)
+        for lead in leads:
+            lead["company_id"] = company_id
+        return leads
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading B2C leads: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error loading B2C leads: {str(e)}"
         )
 
 
@@ -282,6 +319,26 @@ def _parse_follow_up_count(lead: dict) -> int:
         return 0
 
 
+# B2C sheet headers may vary (e.g. "Follow Up Count" with space). Try multiple keys; default 0 so leads go to create_draft.
+_FOLLOW_UP_COUNT_KEYS = ("Follow_Up_Count", "Follow Up Count", "Follow-up Count", "follow_up_count", "FollowUpCount")
+
+
+def _parse_follow_up_count_b2c_robust(lead: dict) -> int:
+    """Parse Follow_Up_Count from B2C lead dict; try multiple column names; return 0 if missing or invalid so leads go to create_draft by default."""
+    for key in _FOLLOW_UP_COUNT_KEYS:
+        v = lead.get(key)
+        if v is None or v == "":
+            continue
+        try:
+            n = int(float(str(v).strip()))
+            if n < 0:
+                return 0
+            return n
+        except (ValueError, TypeError):
+            continue
+    return 0
+
+
 def _parse_date_only(s: Optional[str]) -> Optional[date]:
     """Parse YYYY-MM-DD from string; return None if invalid."""
     if not s or not str(s).strip():
@@ -291,6 +348,34 @@ def _parse_date_only(s: Optional[str]) -> Optional[date]:
         return date.fromisoformat(s)
     except ValueError:
         return None
+
+
+# Try multiple formats and Excel serial; used for Next_Followup_Date from sheets.
+def _parse_date_flexible(s) -> Optional[date]:
+    """Parse date from string or number (Google Sheets may return MM/DD/YYYY or Excel serial)."""
+    if s is None:
+        return None
+    if isinstance(s, (int, float)):
+        try:
+            from datetime import timedelta
+            base = date(1899, 12, 30)
+            return base + timedelta(days=int(float(s)))
+        except (ValueError, OverflowError):
+            return None
+    raw = str(s).strip()
+    if not raw:
+        return None
+    # YYYY-MM-DD
+    d = _parse_date_only(raw)
+    if d is not None:
+        return d
+    from datetime import datetime
+    for fmt in ("%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%m-%d-%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(raw[:12].strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 @router.get("/b2b/leads-due-for-follow-up")
@@ -393,6 +478,135 @@ async def mark_lead_outreach_stopped(
         )
 
 
+def _parse_follow_up_count_b2c(lead: dict) -> int:
+    """Parse Follow_Up_Count from B2C lead dict; use robust parser (multiple column names, default 0)."""
+    return _parse_follow_up_count_b2c_robust(lead)
+
+
+@router.get("/b2c/leads-due-for-follow-up")
+async def get_b2c_leads_due_for_follow_up(
+    company_id: str = Query(..., description="Company ID"),
+    as_of_date: Optional[str] = Query(None, description="Date YYYY-MM-DD (default today)"),
+    db: AsyncSession = Depends(get_db),
+    _auth: Optional[Admin] = Depends(get_current_admin_or_n8n_key),
+):
+    """
+    Get B2C leads due for follow-up draft (Follow_Up_Count 0 or 1) and leads to mark as "No Response – Outreach Stopped" (Follow_Up_Count 2).
+    Auth: admin JWT or X-API-Key (N8N_SERVICE_API_KEY).
+    """
+    try:
+        company_id = clean_company_id(company_id)
+        company = await tenant_service.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        if not company.encrypted_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Company OAuth not connected",
+            )
+        target = _parse_date_only(as_of_date) or today_ist()
+        leads = await crm_loader_service.get_b2c_leads(db, company_id)
+        stopped_status = "No Response – Outreach Stopped"
+        # Column name may vary in sheet (e.g. "Next Followup Date")
+        next_followup_keys = ("Next_Followup_Date", "Next Followup Date", "NextFollowupDate")
+        leads_due_for_draft = []
+        leads_to_mark_stopped = []
+        for lead in leads:
+            b2c_lead_id = lead.get("B2C_Lead_ID") or lead.get("b2c_lead_id")
+            if not b2c_lead_id:
+                continue
+            stage = (lead.get("Stage") or "").strip()
+            status_val = (lead.get("Status") or "").strip()
+            if stage == "Replied" or status_val == stopped_status:
+                logger.debug("B2C leads-due: lead %s skipped (replied or stopped)", b2c_lead_id)
+                continue
+            next_followup = None
+            for k in next_followup_keys:
+                next_followup = lead.get(k)
+                if next_followup is not None and str(next_followup).strip():
+                    break
+            followup_d = _parse_date_flexible(next_followup)
+            if followup_d is None:
+                logger.debug(
+                    "B2C leads-due: lead %s skipped (Next_Followup_Date unparseable: %r)",
+                    b2c_lead_id, next_followup,
+                )
+                continue
+            if followup_d > target:
+                logger.debug(
+                    "B2C leads-due: lead %s skipped (followup %s > target %s)",
+                    b2c_lead_id, followup_d, target,
+                )
+                continue
+            count = _parse_follow_up_count_b2c(lead)
+            lead["company_id"] = company_id
+            lead["Follow_Up_Count"] = count
+            if count < 2:
+                leads_due_for_draft.append(lead)
+                logger.info(
+                    "B2C leads-due: lead %s count=%s → leads_due_for_draft (create follow-up draft)",
+                    b2c_lead_id, count,
+                )
+            else:
+                leads_to_mark_stopped.append(lead)
+                logger.info(
+                    "B2C leads-due: lead %s count=%s → leads_to_mark_stopped (no response)",
+                    b2c_lead_id, count,
+                )
+        return {
+            "company_id": company_id,
+            "leads_due_for_draft": leads_due_for_draft,
+            "leads_to_mark_stopped": leads_to_mark_stopped,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting B2C leads due for follow-up: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.patch("/b2c/leads/{b2c_lead_id}/mark-outreach-stopped")
+async def mark_b2c_lead_outreach_stopped(
+    b2c_lead_id: str,
+    company_id: str = Query(..., description="Company ID"),
+    db: AsyncSession = Depends(get_db),
+    _auth: Optional[Admin] = Depends(get_current_admin_or_n8n_key),
+):
+    """
+    Mark B2C lead as "No Response – Outreach Stopped" in B2C_FUNNEL (Status and Stage).
+    Auth: admin JWT or X-API-Key (N8N_SERVICE_API_KEY).
+    """
+    try:
+        company_id = clean_company_id(company_id)
+        company = await tenant_service.get_company_by_id(db, company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        if not company.encrypted_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Company OAuth not connected",
+            )
+        await crm_loader_service.update_b2c_outreach_stopped(
+            db=db, company_id=company_id, b2c_lead_id=b2c_lead_id.strip()
+        )
+        return {
+            "status": "success",
+            "message": "B2C lead marked as No Response – Outreach Stopped",
+            "b2c_lead_id": b2c_lead_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking B2C lead outreach stopped: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
 @router.get("/b2b/leads/{lead_id}/activities", response_model=List[ActivityResponse])
 async def get_lead_activities(
     lead_id: str,
@@ -475,18 +689,30 @@ async def create_outbound_email(
                 detail="Company OAuth not connected. Please connect OAuth first."
             )
         
-        # Load lead data from CRM
-        lead_data = await crm_loader_service.get_b2b_lead(
-            db, request.company_id, request.lead_id
-        )
+        email_type_normalized = (request.email_type or "B2B").strip().lower()
         
-        if not lead_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Lead {request.lead_id} not found in CRM"
+        # B2C: load from B2C_FUNNEL worksheet
+        if email_type_normalized == "b2c":
+            lead_data = await crm_loader_service.get_b2c_lead(
+                db, request.company_id, request.lead_id
             )
+            if not lead_data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"B2C lead {request.lead_id} not found in B2C_FUNNEL"
+                )
+        else:
+            # B2B: load from LEADS worksheet
+            lead_data = await crm_loader_service.get_b2b_lead(
+                db, request.company_id, request.lead_id
+            )
+            if not lead_data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Lead {request.lead_id} not found in CRM"
+                )
         
-        # Load activity history
+        # Load activity history (ACTIVITIES worksheet; Lead_ID = request.lead_id for both B2B and B2C)
         activities = await crm_loader_service.get_lead_activities(
             db, request.company_id, request.lead_id
         )
@@ -505,7 +731,7 @@ async def create_outbound_email(
         # Initialize Flow 2 Orchestrator
         orchestrator = Flow2Orchestrator()
         
-        # Process outbound email
+        # Process outbound email (Flow2 sets recipient_context.lead_source from email_type)
         result = await orchestrator.process_outbound(
             db=db,
             company_id=request.company_id,
@@ -525,13 +751,14 @@ async def create_outbound_email(
         
         logger.info(f"Created outbound email {result['email_id']} for lead {request.lead_id}")
         
+        lead_stage = lead_data.get("Stage") if email_type_normalized == "b2b" else lead_data.get("Stage")
         return OutboundCreateResponse(
             email_id=result["email_id"],
             draft_id=result["draft_id"],
             status=result["status"],
             subject=result["subject"],
             recipient=result["recipient"],
-            lead_stage=lead_data.get("Stage")
+            lead_stage=lead_stage
         )
         
     except HTTPException:
@@ -551,15 +778,16 @@ async def update_crm_after_send(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Update CRM sheets after email is sent (LEADS, ACTIVITIES, TASKS — all linked by lead_id).
-    Only for B2B outbound emails or our replies in a B2B thread (lead_id required). Normal
-    inbound threads and their replies must not call this; n8n gates with "Is Outbound B2B?".
+    Update CRM sheets after email is sent. Used for both B2B and B2C outbound and their reply threads.
+    lead_id and lead_source can be in the request body or are read from the draft's email.recipient_context.
     No auth required — n8n calls this directly (same as /api/drafts/{id}/sent).
-    
-    1. Logs email activity to ACTIVITIES (linked to lead_id).
-    2. Updates LEADS: Stage, Engagement_Level, Owner, Last_Activity_Date,
-       Next_Followup_Date (from PLAYBOOKS.md), Status, Objection_Notes, Notes.
-    3. Creates follow-up task in TASKS (linked to lead_id).
+
+    B2B: updates LEADS, ACTIVITIES, TASKS (linked by Lead_ID).
+    B2C: updates B2C_FUNNEL, ACTIVITIES, TASKS (B2C_Lead_ID used as Lead_ID in ACTIVITIES/TASKS).
+
+    On send: Stage = "Email Sent", Last_Activity_Date = send date, Next_Followup_Date = send date + N days
+    (N from PLAYBOOKS.md / brand context, default 3), Status = "Active". ACTIVITIES and TASKS get one row
+    each linked by lead_id. Follow_Up_Count incremented for time_based (follow-up) sends.
     """
     try:
         result = await db.execute(
@@ -582,24 +810,40 @@ async def update_crm_after_send(
                 detail="Email not found"
             )
         
-        # Update CRM for (1) outbound B2B emails and (2) replies in that same thread (inbound with lead_id from thread root).
+        # Resolve lead_id and lead_source: prefer email.recipient_context (so B2C always gets lead_id/lead_source), then body, then thread root for replies
+        import json
         is_outbound = (getattr(email, "email_type", None) or "").strip().lower() == "outbound"
-        lead_id = (update_data.lead_id or "").strip()
+        rc_lead_id = ""
+        rc_lead_source = None
+        if email.recipient_context:
+            rc = email.recipient_context
+            if isinstance(rc, str):
+                try:
+                    rc = json.loads(rc)
+                except Exception:
+                    rc = None
+            if isinstance(rc, dict):
+                rc_lead_id = (rc.get("lead_id") or rc.get("Lead_ID") or "").strip()
+                rc_lead_source = (rc.get("lead_source") or "").strip().lower() or None
+        lead_id = (update_data.lead_id or "").strip() or rc_lead_id
+        lead_source = (update_data.lead_source or "").strip().lower() or rc_lead_source
+        if not lead_source:
+            lead_source = "b2b"
         resolved_lead_from_thread = False
         if not lead_id and not is_outbound and getattr(email, "thread_id", None):
             lead_id = await get_lead_id_from_thread_root(db, str(email.company_id), email.thread_id) or ""
             lead_id = (lead_id or "").strip()
             if lead_id:
                 resolved_lead_from_thread = True
-                logger.info("CRM update for reply in B2B thread: resolved lead_id=%s from thread", lead_id)
+                logger.info("CRM update for reply in thread: resolved lead_id=%s from thread", lead_id)
         if not lead_id:
             logger.info(
-                "Skipping CRM update: email_type=%s, lead_id empty (CRM only for outbound B2B and their reply thread)",
+                "Skipping CRM update: email_type=%s, lead_id empty (CRM only for outbound and their reply thread)",
                 getattr(email, "email_type", None),
             )
             return {
                 "status": "skipped",
-                "message": "CRM update only for outbound B2B emails and their reply thread",
+                "message": "CRM update only for outbound emails and their reply thread",
                 "lead_id": None,
             }
 
@@ -635,11 +879,22 @@ async def update_crm_after_send(
         follow_up_count_for_lead = None
         stage_for_lead = update_data.stage or "Email Sent"
         if is_follow_up:
-            current_count = await crm_loader_service.get_lead_follow_up_count(
-                db=db, company_id=company_id, lead_id=lead_id
-            )
-            new_count = current_count + 1
-            follow_up_count_for_lead = new_count
+            if lead_source == "b2c":
+                current_count = await crm_loader_service.get_b2c_follow_up_count(
+                    db=db, company_id=company_id, b2c_lead_id=lead_id
+                )
+                new_count = current_count + 1
+                follow_up_count_for_lead = new_count
+                logger.info(
+                    "B2C follow-up send: incrementing Follow_Up_Count for lead %s from %s to %s",
+                    lead_id, current_count, new_count,
+                )
+            else:
+                current_count = await crm_loader_service.get_lead_follow_up_count(
+                    db=db, company_id=company_id, lead_id=lead_id
+                )
+                new_count = current_count + 1
+                follow_up_count_for_lead = new_count
             if not update_data.stage:
                 stage_for_lead = f"Follow-up {new_count} Sent" if new_count in (1, 2) else "Email Sent"
 
@@ -652,7 +907,7 @@ async def update_crm_after_send(
         else:
             activity_summary = f"Sent email: {email.subject}"
 
-        # 1. Log email activity to ACTIVITIES (linked to lead_id)
+        # 1. Log email activity to ACTIVITIES (linked to lead_id; same for B2B and B2C)
         await crm_loader_service.log_email_activity(
             db=db,
             company_id=company_id,
@@ -666,21 +921,33 @@ async def update_crm_after_send(
             followup_date=next_followup_date
         )
         
-        # 2. Update LEADS: Stage, Engagement_Level, Owner, Last_Activity_Date, Next_Followup_Date, Status, Follow_Up_Count, Objection_Notes, Notes
-        await crm_loader_service.update_lead_after_send(
-            db=db,
-            company_id=company_id,
-            lead_id=lead_id,
-            last_activity_date=today_str,
-            next_followup_date=next_followup_date,
-            stage=stage_for_lead,
-            engagement_level=update_data.engagement_level or "Medium",
-            owner=update_data.owner or company_name,
-            status=update_data.status or "Active",
-            objection_notes=update_data.objection_notes,
-            notes=update_data.notes,
-            follow_up_count=follow_up_count_for_lead,
-        )
+        # 2. Update LEADS or B2C_FUNNEL
+        if lead_source == "b2c":
+            await crm_loader_service.update_b2c_funnel_after_send(
+                db=db,
+                company_id=company_id,
+                b2c_lead_id=lead_id,
+                last_activity_date=today_str,
+                next_followup_date=next_followup_date,
+                stage=stage_for_lead,
+                status=update_data.status or "Active",
+                follow_up_count=follow_up_count_for_lead,
+            )
+        else:
+            await crm_loader_service.update_lead_after_send(
+                db=db,
+                company_id=company_id,
+                lead_id=lead_id,
+                last_activity_date=today_str,
+                next_followup_date=next_followup_date,
+                stage=stage_for_lead,
+                engagement_level=update_data.engagement_level or "Medium",
+                owner=update_data.owner or company_name,
+                status=update_data.status or "Active",
+                objection_notes=update_data.objection_notes,
+                notes=update_data.notes,
+                follow_up_count=follow_up_count_for_lead,
+            )
         
         # 3. Create follow-up task in TASKS (linked to lead_id)
         await crm_loader_service.create_followup_task(
@@ -694,7 +961,7 @@ async def update_crm_after_send(
             assigned_to=company_name
         )
         
-        # 4. When we sent a reply to the lead, mark "Review Reply" tasks as Completed and set Due_Date to today
+        # 4. When we sent a reply to the lead, mark "Review Reply" tasks as Completed
         if resolved_lead_from_thread or (not is_outbound and lead_id):
             try:
                 await crm_loader_service.mark_review_reply_tasks_completed_after_send(
@@ -706,7 +973,8 @@ async def update_crm_after_send(
             except Exception as e:
                 logger.warning("Could not mark Review Reply tasks completed for lead %s: %s", lead_id, e)
         
-        logger.info(f"Updated CRM for lead {lead_id} after sending email (LEADS, ACTIVITIES, TASKS)")
+        sheet_name = "B2C_FUNNEL" if lead_source == "b2c" else "LEADS"
+        logger.info(f"Updated CRM for lead {lead_id} after sending email ({sheet_name}, ACTIVITIES, TASKS)")
         
         return {
             "status": "success",

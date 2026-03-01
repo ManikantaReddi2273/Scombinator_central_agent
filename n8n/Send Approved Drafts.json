@@ -379,7 +379,7 @@
         200
       ],
       "id": "is-outbound-crm",
-      "name": "Is Outbound B2B? (CRM only for outbound)"
+      "name": "Update CRM? (B2B/B2C outbound or reply in thread)"
     },
     {
       "parameters": {
@@ -392,12 +392,16 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.N8N_SERVICE_API_KEY || '' }}"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"lead_id\": \"{{ $('Get Email Info').item.json.recipient_context && $('Get Email Info').item.json.recipient_context.lead_id ? $('Get Email Info').item.json.recipient_context.lead_id : '' }}\",\n  \"activity_summary\": \"Sent email: {{ $('Get Email Info').item.json.subject || $json.subject }}\"\n}",
+        "jsonBody": "={\n  \"lead_id\": \"{{ $('Get Email Info').item.json.recipient_context && $('Get Email Info').item.json.recipient_context.lead_id ? $('Get Email Info').item.json.recipient_context.lead_id : '' }}\",\n  \"lead_source\": \"{{ $('Get Email Info').item.json.recipient_context && $('Get Email Info').item.json.recipient_context.lead_source ? $('Get Email Info').item.json.recipient_context.lead_source : '' }}\",\n  \"activity_summary\": \"Sent email: {{ $('Get Email Info').item.json.subject || $json.subject }}\"\n}",
         "options": {
           "response": {
             "response": {
@@ -698,7 +702,7 @@
       "main": [
         [
           {
-            "node": "Is Outbound B2B? (CRM only for outbound)",
+            "node": "Update CRM? (B2B/B2C outbound or reply in thread)",
             "type": "main",
             "index": 0
           }
@@ -714,7 +718,7 @@
         ]
       ]
     },
-    "Is Outbound B2B? (CRM only for outbound)": {
+    "Update CRM? (B2B/B2C outbound or reply in thread)": {
       "main": [
         [
           {

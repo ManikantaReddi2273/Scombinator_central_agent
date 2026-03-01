@@ -54,6 +54,37 @@ class B2BLeadResponse(BaseModel):
         return None
 
 
+class B2CLeadResponse(BaseModel):
+    """B2C lead response schema (B2C_FUNNEL worksheet)"""
+    B2C_Lead_ID: str
+    Name: Optional[str] = None
+    Email: Optional[str] = None
+    Source: Optional[str] = None
+    Campaign_id: Optional[str] = None
+    Campaign: Optional[str] = None
+    Stage: Optional[str] = None
+    Last_Activity_Date: Optional[str] = None
+    Next_Followup_Date: Optional[str] = None
+    Status: Optional[str] = None
+    Notes: Optional[str] = None
+    Follow_Up_Count: Optional[int] = None
+    company_id: str  # For UI filtering
+
+    @field_validator("Follow_Up_Count", mode="before")
+    @classmethod
+    def coerce_follow_up_count(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v.strip())
+            except ValueError:
+                return None
+        return None
+
+
 class ActivityResponse(BaseModel):
     """Activity response schema"""
     Activity_ID: str
@@ -79,8 +110,9 @@ class OutboundCreateResponse(BaseModel):
 
 
 class OutboundUpdateCRMRequest(BaseModel):
-    """Request to update CRM after email sent. LEADS, ACTIVITIES, and TASKS are updated and linked by lead_id."""
+    """Request to update CRM after email sent. LEADS/B2C_FUNNEL, ACTIVITIES, and TASKS updated and linked by lead_id."""
     lead_id: str
+    lead_source: Optional[str] = None  # "b2b" or "b2c"; if not set, inferred from email.recipient_context
     activity_summary: Optional[str] = None
     next_followup_date: Optional[str] = None
     # Optional overrides; if not set, backend uses defaults from playbook and company

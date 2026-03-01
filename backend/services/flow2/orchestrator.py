@@ -51,10 +51,16 @@ class Flow2Orchestrator:
         Returns:
             Initialized Flow2State
         """
+        # B2C uses B2C_Lead_ID; B2B uses Lead_ID/ID. Ensures recipient_context.lead_id is set for CRM (B2C_FUNNEL, ACTIVITIES, TASKS).
+        lead_id = (
+            lead_data.get("B2C_Lead_ID")
+            or lead_data.get("Lead_ID")
+            or lead_data.get("ID", "")
+        )
         return Flow2State(
             # Step 1: Intent Definition (input)
             company_id=company_id,
-            lead_id=lead_data.get("Lead_ID", lead_data.get("ID", "")),
+            lead_id=lead_id,
             lead_data=lead_data,
             activities=activities,
             email_type=email_type,

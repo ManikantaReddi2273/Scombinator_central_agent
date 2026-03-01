@@ -373,7 +373,288 @@ class CRMLoaderService:
         except Exception as e:
             logger.error(f"Error loading lead {lead_id} for company {company_id}: {str(e)}")
             raise
-    
+
+    # ---------- B2C_FUNNEL worksheet (same workbook as LEADS) ----------
+    B2C_FUNNEL_WORKSHEET_NAMES = ["B2C_FUNNEL", "B2c_funnel", "b2c_funnel"]
+    B2C_LEAD_ID_COLUMN_NAMES = ["B2C_Lead_ID", "B2C_Lead ID", "b2c_lead_id"]
+
+    async def _read_b2c_funnel_worksheet(
+        self, db: AsyncSession, company_id: str, spreadsheet: Dict
+    ) -> Optional[tuple]:
+        """Read B2C_FUNNEL worksheet; returns (rows, worksheet_name) or None if not found."""
+        for ws_name in self.B2C_FUNNEL_WORKSHEET_NAMES:
+            try:
+                rows = await self.google_api.read_spreadsheet(
+                    db, company_id, spreadsheet['id'], ws_name
+                )
+                if rows and len(rows) > 0:
+                    return (rows, ws_name)
+            except Exception as e:
+                logger.debug(f"Worksheet '{ws_name}' not found or error: {e}")
+                continue
+        return None
+
+    def _get_b2c_lead_id_column_index(self, header: List) -> Optional[int]:
+        """Return 0-based index of B2C_Lead_ID column in B2C_FUNNEL header."""
+        header_str = [str(h).strip() for h in header]
+        for col_name in self.B2C_LEAD_ID_COLUMN_NAMES:
+            for idx, h in enumerate(header_str):
+                if h.replace(" ", "_") == col_name.replace(" ", "_"):
+                    return idx
+        return None
+
+    def _find_b2c_funnel_row_by_lead_id(
+        self, rows: List[List], header: List, b2c_lead_id: str
+    ) -> Optional[int]:
+        """Find B2C_FUNNEL data row number (1-based, header=1) for the given B2C_Lead_ID."""
+        lead_id_idx = self._get_b2c_lead_id_column_index(header)
+        if lead_id_idx is None:
+            return None
+        for idx, row in enumerate(rows[1:], start=2):
+            if lead_id_idx < len(row) and str(row[lead_id_idx]).strip() == str(b2c_lead_id).strip():
+                return idx
+        return None
+
+    async def get_b2c_leads(self, db: AsyncSession, company_id: str) -> List[Dict]:
+        """
+        Get all B2C leads from CRM workbook, B2C_FUNNEL worksheet.
+        Columns: B2C_Lead_ID, Name, Email, Source, Campaign_id, Campaign, Stage,
+        Last_Activity_Date, Next_Followup_Date, Status, Notes, Follow_Up_Count.
+        """
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                logger.warning(f"CRM workbook not found for company {company_id}")
+                return []
+            result = await self._read_b2c_funnel_worksheet(db, company_id, spreadsheet)
+            if not result:
+                logger.warning(f"B2C_FUNNEL worksheet not found for company {company_id}")
+                return []
+            rows, ws_name = result
+            if len(rows) < 2:
+                return []
+            header = rows[0]
+            column_map = {}
+            for idx, col_name in enumerate(header):
+                column_map[str(col_name).strip()] = idx
+            leads = []
+            stopped_status = "No Response – Outreach Stopped"
+            for row in rows[1:]:
+                if not row or len(row) == 0:
+                    continue
+                lead = {}
+                for col_name, col_idx in column_map.items():
+                    lead[col_name] = row[col_idx] if col_idx < len(row) else None
+                status = (lead.get("Status") or "").strip()
+                if status == stopped_status:
+                    continue
+                stage = (lead.get("Stage") or "").strip()
+                if stage == stopped_status:
+                    continue
+                leads.append(lead)
+            logger.info(f"Loaded {len(leads)} B2C leads for company {company_id}")
+            return leads
+        except Exception as e:
+            logger.error(f"Error loading B2C leads for company {company_id}: {str(e)}")
+            raise
+
+    def _b2c_lead_id_from_row(self, lead: Dict) -> Optional[str]:
+        """Get B2C_Lead_ID value from a lead row (any supported column name)."""
+        for col in self.B2C_LEAD_ID_COLUMN_NAMES:
+            for key in lead:
+                if key.replace(" ", "_") == col.replace(" ", "_"):
+                    val = lead.get(key)
+                    if val is not None and str(val).strip():
+                        return str(val).strip()
+        return None
+
+    async def get_b2c_lead(
+        self, db: AsyncSession, company_id: str, b2c_lead_id: str
+    ) -> Optional[Dict]:
+        """Get a single B2C lead by B2C_Lead_ID."""
+        try:
+            leads = await self.get_b2c_leads(db, company_id)
+            want = str(b2c_lead_id).strip()
+            for lead in leads:
+                if self._b2c_lead_id_from_row(lead) == want:
+                    return lead
+            return None
+        except Exception as e:
+            logger.error(f"Error loading B2C lead {b2c_lead_id}: {str(e)}")
+            raise
+
+    async def get_b2c_follow_up_count(
+        self, db: AsyncSession, company_id: str, b2c_lead_id: str
+    ) -> int:
+        """Read Follow_Up_Count from B2C_FUNNEL row. Returns 0 if missing or non-numeric."""
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                return 0
+            result = await self._read_b2c_funnel_worksheet(db, company_id, spreadsheet)
+            if not result:
+                return 0
+            rows, ws_name = result
+            if not rows or len(rows) < 2:
+                return 0
+            header = [str(h).strip() for h in rows[0]]
+            column_map = {col: idx for idx, col in enumerate(header)}
+            b2c_lead_id_idx = self._get_b2c_lead_id_column_index(header)
+            follow_up_idx = column_map.get("Follow_Up_Count")
+            if b2c_lead_id_idx is None or follow_up_idx is None:
+                return 0
+            for row in rows[1:]:
+                if b2c_lead_id_idx < len(row) and str(row[b2c_lead_id_idx]).strip() == str(b2c_lead_id).strip():
+                    val = row[follow_up_idx] if follow_up_idx < len(row) else None
+                    if val is None or val == "":
+                        return 0
+                    try:
+                        return int(float(str(val).strip()))
+                    except (ValueError, TypeError):
+                        return 0
+            return 0
+        except Exception as e:
+            logger.warning("Could not read B2C Follow_Up_Count for %s: %s", b2c_lead_id, e)
+            return 0
+
+    async def update_b2c_funnel_after_send(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        b2c_lead_id: str,
+        last_activity_date: str,
+        next_followup_date: str,
+        stage: str = "Email Sent",
+        status: str = "Active",
+        follow_up_count: Optional[int] = None,
+    ) -> bool:
+        """Update B2C_FUNNEL row after outbound send. Row found by B2C_Lead_ID."""
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                raise Exception(f"CRM workbook not found for company {company_id}")
+            result = await self._read_b2c_funnel_worksheet(db, company_id, spreadsheet)
+            if not result:
+                raise Exception("B2C_FUNNEL worksheet not found")
+            rows, ws_name = result
+            if not rows or len(rows) < 2:
+                raise Exception("B2C_FUNNEL worksheet is empty or invalid")
+            header = rows[0]
+            column_map = {str(col).strip(): idx for idx, col in enumerate(header)}
+            row_num = self._find_b2c_funnel_row_by_lead_id(rows, header, b2c_lead_id)
+            if row_num is None:
+                raise Exception(f"B2C lead {b2c_lead_id} not found in B2C_FUNNEL")
+            updates = []
+            if "Stage" in column_map:
+                updates.append(("Stage", stage))
+            if "Last_Activity_Date" in column_map:
+                updates.append(("Last_Activity_Date", last_activity_date))
+            if "Next_Followup_Date" in column_map:
+                updates.append(("Next_Followup_Date", next_followup_date))
+            if "Status" in column_map:
+                updates.append(("Status", status))
+            if follow_up_count is not None and "Follow_Up_Count" in column_map:
+                updates.append(("Follow_Up_Count", str(follow_up_count)))
+                logger.info("B2C_FUNNEL: writing Follow_Up_Count=%s for B2C_Lead_ID=%s", follow_up_count, b2c_lead_id)
+            for col_name, value in updates:
+                idx = column_map[col_name]
+                col_letter = self._col_letter(idx)
+                range_name = f"{ws_name}!{col_letter}{row_num}"
+                await self.google_api.update_spreadsheet_cell(
+                    db, company_id, spreadsheet["id"], range_name, value or ""
+                )
+            logger.info(
+                "Updated B2C_FUNNEL for %s: Stage=%s, Last_Activity_Date=%s, Next_Followup_Date=%s",
+                b2c_lead_id, stage, last_activity_date, next_followup_date,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error updating B2C_FUNNEL after send for {b2c_lead_id}: {str(e)}")
+            raise
+
+    async def update_b2c_outreach_stopped(
+        self, db: AsyncSession, company_id: str, b2c_lead_id: str
+    ) -> bool:
+        """Set B2C_FUNNEL Status/Stage to 'No Response – Outreach Stopped'."""
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                raise Exception(f"CRM workbook not found for company {company_id}")
+            result = await self._read_b2c_funnel_worksheet(db, company_id, spreadsheet)
+            if not result:
+                raise Exception("B2C_FUNNEL worksheet not found")
+            rows, ws_name = result
+            if not rows or len(rows) < 2:
+                raise Exception("B2C_FUNNEL worksheet is empty or invalid")
+            header = rows[0]
+            column_map = {str(col).strip(): idx for idx, col in enumerate(header)}
+            row_num = self._find_b2c_funnel_row_by_lead_id(rows, header, b2c_lead_id)
+            if row_num is None:
+                raise Exception(f"B2C lead {b2c_lead_id} not found in B2C_FUNNEL")
+            stopped_value = "No Response – Outreach Stopped"
+            updates = []
+            if "Status" in column_map:
+                updates.append(("Status", stopped_value))
+            if "Stage" in column_map:
+                updates.append(("Stage", stopped_value))
+            for col_name, value in updates:
+                idx = column_map[col_name]
+                col_letter = self._col_letter(idx)
+                range_name = f"{ws_name}!{col_letter}{row_num}"
+                await self.google_api.update_spreadsheet_cell(
+                    db, company_id, spreadsheet["id"], range_name, value
+                )
+            logger.info("Marked B2C lead %s as No Response – Outreach Stopped", b2c_lead_id)
+            return True
+        except Exception as e:
+            logger.error(f"Error marking B2C outreach stopped for {b2c_lead_id}: {str(e)}")
+            raise
+
+    async def update_b2c_funnel_lead_replied(
+        self,
+        db: AsyncSession,
+        company_id: str,
+        b2c_lead_id: str,
+        last_activity_date: str,
+        next_followup_date: str,
+        stage: str = "Replied",
+    ) -> bool:
+        """Update B2C_FUNNEL when lead has replied (Stage=Replied, dates)."""
+        try:
+            spreadsheet = await self._get_crm_workbook(db, company_id)
+            if not spreadsheet:
+                raise Exception(f"CRM workbook not found for company {company_id}")
+            result = await self._read_b2c_funnel_worksheet(db, company_id, spreadsheet)
+            if not result:
+                raise Exception("B2C_FUNNEL worksheet not found")
+            rows, ws_name = result
+            if not rows or len(rows) < 2:
+                raise Exception("B2C_FUNNEL worksheet is empty or invalid")
+            header = rows[0]
+            column_map = {str(col).strip(): idx for idx, col in enumerate(header)}
+            row_num = self._find_b2c_funnel_row_by_lead_id(rows, header, b2c_lead_id)
+            if row_num is None:
+                raise Exception(f"B2C lead {b2c_lead_id} not found in B2C_FUNNEL")
+            updates = [
+                ("Stage", stage),
+                ("Last_Activity_Date", last_activity_date),
+                ("Next_Followup_Date", next_followup_date),
+            ]
+            for col_name, value in updates:
+                if col_name not in column_map:
+                    continue
+                idx = column_map[col_name]
+                col_letter = self._col_letter(idx)
+                range_name = f"{ws_name}!{col_letter}{row_num}"
+                await self.google_api.update_spreadsheet_cell(
+                    db, company_id, spreadsheet["id"], range_name, value or ""
+                )
+            logger.info("Updated B2C_FUNNEL for lead replied: %s", b2c_lead_id)
+            return True
+        except Exception as e:
+            logger.error(f"Error updating B2C_FUNNEL for reply for {b2c_lead_id}: {str(e)}")
+            raise
+
     async def get_lead_activities(
         self,
         db: AsyncSession,

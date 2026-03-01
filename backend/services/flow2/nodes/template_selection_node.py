@@ -46,6 +46,12 @@ async def template_selection_node(state: Flow2State) -> Dict:
     
     # Map intent to template patterns
     template_patterns = {
+        "initial_outreach": [
+            "outreach/initial_outreach.md",
+            "outreach/b2c_initial.md",
+            "initial_outreach.md",
+            "b2c_initial.md"
+        ],
         "followup_checkin": [
             "outreach/soft_follow_up.md",
             "outreach/follow_up.md",

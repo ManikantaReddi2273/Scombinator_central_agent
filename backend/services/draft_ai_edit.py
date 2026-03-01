@@ -3,8 +3,10 @@ AI-assisted draft editing service.
 Uses the internal LLM to edit draft subject and body based on user instructions.
 Brand-context aware: when brand_context is provided (from Redis/Drive), the LLM
 adheres to the company's voice, tone, and policies when editing.
+Optimized for latency: smaller brand snippet, lower max_tokens, optional faster model.
 """
 from services.openai_client import openai_client
+from config import settings
 from typing import Tuple, Optional, Dict, Any
 import logging
 
@@ -13,17 +15,18 @@ logger = logging.getLogger(__name__)
 # Safe max length for body to avoid oversized responses
 MAX_BODY_LENGTH = 50_000
 
-# Max chars of brand context to include in prompt (avoid token overflow)
-MAX_VOICE_CHARS = 2000
-MAX_POLICIES_CHARS = 800
-MAX_COMPANY_CHARS = 500
+# Shorter brand context for draft edit = smaller prompt = faster response
+MAX_VOICE_CHARS = 900
+MAX_POLICIES_CHARS = 400
+MAX_COMPANY_CHARS = 300
 
 BASE_SYSTEM_RULES = """You are an email draft editor. Apply the user's editing instruction to the draft.
 
 Rules:
 1. Apply only the user's instruction; preserve intent and structure unless the instruction says otherwise.
 2. Do not add new facts, make up information, or hallucinate.
-3. Output only valid JSON with exactly two keys: "subject" (string) and "body" (string). No markdown, no commentary, no other keys."""
+3. Output only valid JSON with exactly two keys: "subject" (string) and "body" (string). No markdown, no commentary, no other keys.
+4. Always return the complete email in "body" (full text with your edit applied). Never return an empty or partial body."""
 
 
 def _build_brand_section(brand_context: Dict[str, Any]) -> str:
@@ -103,33 +106,53 @@ async def edit_draft_with_ai(
         {"role": "user", "content": user_content},
     ]
 
-    response = await openai_client.chat_completion(
-        messages=messages,
-        temperature=0.5,
-        max_tokens=2000,
-        response_format={"type": "json_object"},
-    )
+    last_error = None
+    for attempt in range(2):  # At most 2 attempts (initial + 1 retry on parse/validation failure)
+        try:
+            edit_model = getattr(settings, "OPENAI_DRAFT_EDIT_MODEL", None)
+            response = await openai_client.chat_completion(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=2500,
+                response_format={"type": "json_object"},
+                model=edit_model,
+            )
+            if not response:
+                raise ValueError("Empty response from OpenAI")
 
-    data = openai_client.parse_json_response(response)
-    if not isinstance(data, dict):
-        raise ValueError("LLM did not return a JSON object")
+            data = openai_client.parse_json_response(response)
+            if not isinstance(data, dict):
+                raise ValueError("LLM did not return a JSON object")
 
-    # Case-insensitive key lookup (LLM may return "Subject"/"Body")
-    key_lower = {k.lower(): k for k in data.keys()}
-    edited_subject = data.get(key_lower.get("subject", "subject")) if "subject" in key_lower else data.get("subject")
-    edited_body = data.get(key_lower.get("body", "body")) if "body" in key_lower else data.get("body")
-    if edited_subject is None or edited_body is None:
-        raise ValueError("LLM response must contain both 'subject' and 'body'")
+            # Case-insensitive key lookup (LLM may return "Subject"/"Body")
+            key_lower = {k.lower(): k for k in data.keys()}
+            edited_subject = data.get(key_lower.get("subject", "subject")) if "subject" in key_lower else data.get("subject")
+            edited_body = data.get(key_lower.get("body", "body")) if "body" in key_lower else data.get("body")
+            if edited_subject is None or edited_body is None:
+                raise ValueError("LLM response must contain both 'subject' and 'body'")
 
-    edited_subject = str(edited_subject).strip()
-    edited_body = str(edited_body).strip()
-    if not edited_subject:
-        raise ValueError("Edited subject cannot be empty")
-    if not edited_body:
-        raise ValueError("Edited body cannot be empty")
+            edited_subject = str(edited_subject).strip()
+            edited_body = str(edited_body).strip()
+            if not edited_subject:
+                raise ValueError("Edited subject cannot be empty")
+            if not edited_body:
+                raise ValueError("Edited body cannot be empty")
 
-    if len(edited_body) > MAX_BODY_LENGTH:
-        edited_body = edited_body[:MAX_BODY_LENGTH]
-        logger.warning(f"Truncated AI-edited body to {MAX_BODY_LENGTH} chars")
+            if len(edited_body) > MAX_BODY_LENGTH:
+                edited_body = edited_body[:MAX_BODY_LENGTH]
+                logger.warning(f"Truncated AI-edited body to {MAX_BODY_LENGTH} chars")
 
-    return edited_subject, edited_body
+            return edited_subject, edited_body
+
+        except ValueError as e:
+            last_error = e
+            if attempt == 0:
+                logger.warning(f"AI edit attempt {attempt + 1} failed (parse/validation): {e}. Retrying once.")
+            else:
+                raise
+        except Exception as e:
+            raise
+
+    if last_error:
+        raise last_error
+    raise ValueError("AI edit failed after retry")

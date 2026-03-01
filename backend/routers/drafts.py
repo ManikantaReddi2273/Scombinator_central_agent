@@ -112,14 +112,25 @@ async def get_pending_drafts(
             "company_email": company.email if company else None,
         }
         
-        # Add email context if available
+        # Add email context if available (include trigger_type, recipient_context for follow-up UI)
         if email:
+            rc = email.recipient_context
+            if hasattr(rc, "__iter__") and not isinstance(rc, (str, bytes)):
+                pass  # keep as dict
+            elif isinstance(rc, str):
+                try:
+                    import json
+                    rc = json.loads(rc) if rc else None
+                except Exception:
+                    rc = None
             draft_dict["email"] = {
                 "id": str(email.id),
                 "subject": email.subject,
                 "from_email": email.from_email,
                 "to_email": email.to_email,
                 "email_type": email.email_type,
+                "trigger_type": getattr(email, "trigger_type", None),
+                "recipient_context": rc,
                 "body": email.body,
                 "priority_score": email.priority_score,
                 "executive_summary": email.executive_summary,
@@ -183,14 +194,25 @@ async def get_draft(
         "company_email": company.email if company else None,
     }
     
-    # Add email context if available
+    # Add email context if available (include trigger_type, recipient_context for follow-up UI)
     if email:
+        rc = email.recipient_context
+        if hasattr(rc, "__iter__") and not isinstance(rc, (str, bytes)):
+            pass
+        elif isinstance(rc, str):
+            try:
+                import json
+                rc = json.loads(rc) if rc else None
+            except Exception:
+                rc = None
         draft_dict["email"] = {
             "id": str(email.id),
             "subject": email.subject,
             "from_email": email.from_email,
             "to_email": email.to_email,
             "email_type": email.email_type,
+            "trigger_type": getattr(email, "trigger_type", None),
+            "recipient_context": rc,
             "body": email.body,
             "priority_score": email.priority_score,
             "executive_summary": email.executive_summary,
@@ -346,7 +368,7 @@ async def approve_draft(
     }
 
 
-@router.get("/", response_model=list[DraftResponse])
+@router.get("/", response_model=list[dict])
 async def list_drafts(
     company_id: Optional[str] = Query(None, description="Filter by company ID"),
     status: Optional[str] = Query(None, description="Filter by status (pending/approved/rejected/sent)"),
@@ -355,12 +377,17 @@ async def list_drafts(
     admin: Admin = Depends(get_current_admin)
 ):
     """
-    List drafts with optional filters (admin only)
-    Returns drafts sorted by creation date (newest first)
+    List drafts with optional filters (admin only).
+    Returns drafts with email and company context (trigger_type, recipient_context for follow-up UI).
     """
     from uuid import UUID
+    from models.company import Company
     
-    query = select(Draft)
+    query = (
+        select(Draft, Email, Company)
+        .join(Email, Draft.email_id == Email.id, isouter=True)
+        .join(Company, Draft.company_id == Company.company_id)
+    )
     
     if company_id:
         try:
@@ -376,22 +403,54 @@ async def list_drafts(
     query = query.order_by(desc(Draft.created_at)).limit(limit)
     
     result = await db.execute(query)
-    drafts = result.scalars().all()
+    rows = result.all()
     
-    return [
-        DraftResponse(
-            id=d.id,
-            company_id=d.company_id,
-            email_id=d.email_id,
-            subject=d.subject,
-            body=d.body,
-            status=d.status,
-            version=d.version,
-            template_used=d.template_used,
-            created_at=d.created_at
-        )
-        for d in drafts
-    ]
+    out = []
+    for draft, email, company in rows:
+        draft_dict = {
+            "id": str(draft.id),
+            "company_id": str(draft.company_id),
+            "email_id": str(draft.email_id) if draft.email_id else None,
+            "subject": draft.subject,
+            "body": draft.body,
+            "status": draft.status,
+            "version": draft.version,
+            "template_used": draft.template_used,
+            "created_at": draft.created_at.isoformat() if draft.created_at else None,
+            "company_name": company.name if company else None,
+            "company_email": company.email if company else None,
+        }
+        if email:
+            rc = email.recipient_context
+            if isinstance(rc, str):
+                try:
+                    import json
+                    rc = json.loads(rc) if rc else None
+                except Exception:
+                    rc = None
+            draft_dict["email"] = {
+                "id": str(email.id),
+                "subject": email.subject,
+                "from_email": email.from_email,
+                "to_email": email.to_email,
+                "email_type": email.email_type,
+                "trigger_type": getattr(email, "trigger_type", None),
+                "recipient_context": rc,
+                "body": email.body,
+                "priority_score": email.priority_score,
+                "executive_summary": email.executive_summary,
+                "function": email.function,
+                "intent": email.intent,
+                "urgency": email.urgency,
+                "impact": email.impact,
+                "confidence": email.confidence,
+                "recommended_action": email.recommended_action,
+                "thread_id": email.thread_id,
+                "created_at": email.created_at.isoformat() if email.created_at else None,
+            }
+        out.append(draft_dict)
+    
+    return out
 
 
 @router.post("/{draft_id}/reject")

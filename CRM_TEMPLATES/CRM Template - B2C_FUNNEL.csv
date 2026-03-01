@@ -1,2 +1,2 @@
-B2C_Lead_ID,Name,Email,Source,Campaign,Funnel_Stage,Last_Activity_Date,Next_Followup_Date,Demo_Booked,Notes,Next_Action,Campaign_id
-B2C-001,Ananya,ananya@example.com,Instagram,Career Clarity Webinar,Engaged,2026-02-17,2026-02-20,Yes,Clicked link twice; asked for pricing on WhatsApp,,
+B2C_Lead_ID,Name,Email,Source,Campaign_id,Campaign,Stage,Last_Activity_Date,Next_Followup_Date,Status,Notes,Follow_Up_Count
+B2C-001,manikanta,reddymanikanta2005@gmail.com,,CAMP-001,Social Media Automation Project,Email Commented,,,,Commented email under LinkedIn post showing Social Media Automation Project demo,0

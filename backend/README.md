@@ -77,6 +77,18 @@ API Documentation: `http://localhost:8000/docs`
 - `GET /api/drafts/{draft_id}/status` - Get draft status (called by n8n)
 - `POST /api/drafts/{draft_id}/approve` - Approve draft
 
+### Outbound (B2B and B2C)
+- `POST /api/outbound/create` - Create outbound draft (`email_type`: `B2B` or `B2C`; `lead_id` is Lead_ID or B2C_Lead_ID)
+- `GET /api/outbound/b2b/leads` - List B2B leads from CRM LEADS worksheet (admin)
+- `GET /api/outbound/b2c/leads` - List B2C leads from CRM B2C_FUNNEL worksheet (admin)
+- `GET /api/outbound/b2b/leads-due-for-follow-up` - B2B leads due for follow-up draft (admin or n8n key)
+- `GET /api/outbound/b2c/leads-due-for-follow-up` - B2C leads due for follow-up draft (admin or n8n key)
+- `PATCH /api/outbound/b2b/leads/{lead_id}/mark-outreach-stopped` - Mark B2B lead as outreach stopped
+- `PATCH /api/outbound/b2c/leads/{b2c_lead_id}/mark-outreach-stopped` - Mark B2C lead as outreach stopped
+- `POST /api/outbound/sent/{draft_id}/update-crm` - Update CRM after send (LEADS or B2C_FUNNEL, ACTIVITIES, TASKS); `lead_source` inferred from email `recipient_context` if not provided
+
+**CRM workbook:** Same workbook as B2B should contain a **B2C_FUNNEL** worksheet with columns: `B2C_Lead_ID`, `Name`, `Email`, `Source`, `Campaign_id`, `Campaign`, `Stage`, `Last_Activity_Date`, `Next_Followup_Date`, `Status`, `Notes`, `Follow_Up_Count`. ACTIVITIES and TASKS use `Lead_ID` for both B2B and B2C (store B2C_Lead_ID as Lead_ID for B2C rows).
+
 ## Architecture
 
 - **FastAPI** - Web framework
