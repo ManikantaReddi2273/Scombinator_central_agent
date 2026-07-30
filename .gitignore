@@ -1,11 +1,24 @@
-# n8n Database and Logs (too large for Git)
-n8n/data/database.sqlite
-n8n/data/database.sqlite-shm
-n8n/data/database.sqlite-wal
-n8n/data/n8nEventLog*.log
-n8n/data/crash.journal
+# =========================
+# Secrets & credentials
+# =========================
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.template
 
+# Google OAuth / API credential downloads (never commit)
+scombinator_creditional_google_oauth.json
+*credentials*.json
+*creditional*.json
+client_secret*.json
+*.pem
+*.key
+secrets/
+
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -14,50 +27,77 @@ __pycache__/
 env/
 venv/
 ENV/
-.venv
+.venv/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
-# Environment
-.env
-.env.local
-.env.*.local
+# =========================
+# Node / Frontend
+# =========================
+node_modules/
+dist/
+dist-ssr/
+build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# IDE
+# =========================
+# n8n runtime data (keep workflows as JSON in n8n/)
+# =========================
+n8n/data/database.sqlite
+n8n/data/database.sqlite-shm
+n8n/data/database.sqlite-wal
+n8n/data/n8nEventLog*.log
+n8n/data/crash.journal
+n8n/data/binaryData/
+n8n/data/storage/
+n8n/data/*.log
+
+# =========================
+# Databases & caches
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+coverage/
+.cache/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# IDE / OS
+# =========================
 .vscode/
+!.vscode/extensions.json
 .idea/
 *.swp
 *.swo
 *~
-
-# Database
-*.db
-*.sqlite
-
-# Logs
-*.log
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
+# =========================
 # Cursor
+# =========================
 .cursor/
 
-# Brand Context Documents (company-specific, not for version control)
+# =========================
+# Project-specific
+# =========================
+# Company brand docs (local only)
 Brand Context Documents/
-

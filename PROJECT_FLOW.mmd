@@ -1,0 +1,62 @@
+%% S Combinator Central Agent Platform — Main End-to-End Flow
+%% Open in: https://mermaid.live
+%% Or use with any Mermaid-compatible editor
+
+flowchart TB
+    subgraph Setup["Setup (once per company)"]
+        S1["Register company"]
+        S2["Connect OAuth via n8n"]
+        S3["Upload CRM + brand docs to Google Drive"]
+        S1 --> S2 --> S3
+    end
+
+    subgraph Inbound["Flow 1 — Inbound (someone emails you)"]
+        I1["Gmail receives email"]
+        I2["n8n → POST /api/emails/process"]
+        I3["LangGraph AI Pipeline"]
+        I3a["Classify → Score → Summarize → Action → Draft"]
+        I4["Save to PostgreSQL"]
+        I5["Admin reviews in Priority Queue"]
+        I6["Admin approves draft"]
+        I7["n8n sends reply via Gmail"]
+        I1 --> I2 --> I3
+        I3 --> I3a
+        I3a --> I4 --> I5 --> I6 --> I7
+    end
+
+    subgraph Outbound["Flow 2 — Outbound (you email leads)"]
+        O1["Manual UI or n8n scheduled follow-up"]
+        O2["POST /api/outbound/create"]
+        O3["LangGraph: Intent → Context → Template → Draft"]
+        O4["Admin approves draft"]
+        O5["n8n sends + updates Google Sheets CRM"]
+        O1 --> O2 --> O3 --> O4 --> O5
+    end
+
+    subgraph B2B_B2C["Outbound types"]
+        B2B["B2B — LEADS sheet\nBusiness leads, demos, proposals"]
+        B2C["B2C — B2C_FUNNEL sheet\nConsumer follow-ups, campaigns"]
+    end
+
+    subgraph Stack["Tech Stack"]
+        FE["React Dashboard"]
+        BE["FastAPI + LangGraph + OpenAI"]
+        N8N["n8n Docker"]
+        DB["PostgreSQL"]
+        GOOG["Gmail · Drive · Sheets"]
+    end
+
+    Setup --> Inbound
+    Setup --> Outbound
+    Outbound --> B2B_B2C
+    O5 -.->|"Lead replies"| I1
+
+    FE --> BE
+    N8N --> BE
+    BE --> DB
+    BE --> GOOG
+    N8N --> GOOG
+
+    style Inbound fill:#e8f4fd
+    style Outbound fill:#fff3cd
+    style Setup fill:#d4edda
