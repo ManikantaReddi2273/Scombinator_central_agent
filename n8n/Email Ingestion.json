@@ -198,6 +198,12 @@
           ]
         },
         "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 800
+            }
+          },
           "queryParameters": {
             "parameters": [
               {
@@ -222,7 +228,10 @@
         200
       ],
       "id": "get-message-details",
-      "name": "Get Full Message Details"
+      "name": "Get Full Message Details",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 3000
     },
     {
       "parameters": {
@@ -296,6 +305,12 @@
         "specifyBody": "json",
         "jsonBody": "={{ {\n  removeLabelIds: ['UNREAD']\n} }}",
         "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1200
+            }
+          },
           "response": {
             "response": {
               "responseFormat": "json",
@@ -303,7 +318,6 @@
             }
           },
           "timeout": 30000,
-          "continueOnFail": true,
           "allowUnauthorizedCerts": false
         }
       },
@@ -315,12 +329,16 @@
       ],
       "id": "mark-email-read",
       "name": "Mark Email as Read",
-      "notes": "Marks email as read. If token lacks gmail.modify scope, this will fail gracefully and workflow continues. Re-authenticate OAuth to fix."
+      "notes": "Marks email as read one-at-a-time to avoid Gmail concurrent-request limits. Retries on 429; continues on scope errors.",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "continueOnFail": true
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Handle Mark Email as Read result gracefully\n// This node processes the result from Mark Email as Read node\n// If it failed due to insufficient scopes, we log a warning but continue\n\nconst markReadResult = $json;\n\n// n8n HTTP Request with continueOnFail outputs error in different formats\n// Check for error in various possible locations\nconst error = markReadResult.error || markReadResult.errorMessage || markReadResult.errorDetails;\nconst errorMessage = error?.errorMessage || error?.message || error?.errorDescription || JSON.stringify(error || markReadResult);\nconst httpCode = error?.httpCode || error?.statusCode || markReadResult.statusCode || markReadResult.httpCode;\n\n// Check if this is an error response\nif (error || httpCode === 403 || (typeof errorMessage === 'string' && (\n  errorMessage.includes('insufficient') || \n  errorMessage.includes('Forbidden') ||\n  errorMessage.includes('insufficientPermissions') ||\n  errorMessage.includes('PERMISSION_DENIED')\n))) {\n  // Check if it's a 403 Forbidden (insufficient scopes) error\n  if (httpCode === 403 || \n      (typeof errorMessage === 'string' && (\n        errorMessage.includes('insufficient') || \n        errorMessage.includes('Forbidden') ||\n        errorMessage.includes('insufficientPermissions') ||\n        errorMessage.includes('ACCESS_TOKEN_SCOPE_INSUFFICIENT')\n      ))) {\n    console.warn('⚠️ Cannot mark email as read: Token lacks gmail.modify scope.');\n    console.warn('This is expected if OAuth was connected with old scopes (gmail.readonly).');\n    console.warn('To fix: Re-authenticate the company OAuth connection in the frontend.');\n    console.warn('The workflow will continue normally - email processing is not affected.');\n    \n    return {\n      success: false,\n      reason: 'insufficient_scopes',\n      message: 'Token lacks gmail.modify scope. Email was processed successfully, but not marked as read. Re-authenticate OAuth to enable this feature.',\n      workflow_continues: true,\n      httpCode: httpCode || 403\n    };\n  }\n  \n  // Other errors\n  console.error('Error marking email as read:', errorMessage);\n  return {\n    success: false,\n    reason: 'api_error',\n    message: errorMessage,\n    workflow_continues: true,\n    httpCode: httpCode\n  };\n}\n\n// Success case - check if we got a valid response\nif (markReadResult && !error && httpCode !== 403) {\n  console.log('✅ Email marked as read successfully');\n  return {\n    success: true,\n    message: 'Email marked as read successfully',\n    data: markReadResult\n  };\n}\n\n// Unknown state - log and continue\nconsole.warn('Unknown result from Mark Email as Read:', JSON.stringify(markReadResult, null, 2));\nreturn {\n  success: false,\n  reason: 'unknown',\n  message: 'Unknown result from mark as read operation',\n  workflow_continues: true,\n  raw_result: markReadResult\n};"
+        "jsCode": "// Handle Mark Email as Read result gracefully\n// This node processes the result from Mark Email as Read node\n// If it failed due to insufficient scopes, we log a warning but continue\n\nconst markReadResult = $json;\n\n// n8n HTTP Request with continueOnFail outputs error in different formats\n// Check for error in various possible locations\nconst error = markReadResult.error || markReadResult.errorMessage || markReadResult.errorDetails;\nconst errorMessage = error?.errorMessage || error?.message || error?.errorDescription || JSON.stringify(error || markReadResult);\nconst httpCode = error?.httpCode || error?.statusCode || markReadResult.statusCode || markReadResult.httpCode;\n\n// Check if this is an error response\nif (error || httpCode === 403 || (typeof errorMessage === 'string' && (\n  errorMessage.includes('insufficient') || \n  errorMessage.includes('Forbidden') ||\n  errorMessage.includes('insufficientPermissions') ||\n  errorMessage.includes('PERMISSION_DENIED')\n))) {\n  // Check if it's a 403 Forbidden (insufficient scopes) error\n  if (httpCode === 403 || \n      (typeof errorMessage === 'string' && (\n        errorMessage.includes('insufficient') || \n        errorMessage.includes('Forbidden') ||\n        errorMessage.includes('insufficientPermissions') ||\n        errorMessage.includes('ACCESS_TOKEN_SCOPE_INSUFFICIENT')\n      ))) {\n    console.warn('⚠️ Cannot mark email as read: Token lacks gmail.modify scope.');\n    console.warn('This is expected if OAuth was connected with old scopes (gmail.readonly).');\n    console.warn('To fix: Re-authenticate the company OAuth connection in the frontend.');\n    console.warn('The workflow will continue normally - email processing is not affected.');\n    \n    return {\n      success: false,\n      reason: 'insufficient_scopes',\n      message: 'Token lacks gmail.modify scope. Email was processed successfully, but not marked as read. Re-authenticate OAuth to enable this feature.',\n      workflow_continues: true,\n      httpCode: httpCode || 403\n    };\n  }\n  \n  // Rate limit / concurrent requests — email already processed by backend\n  if (httpCode === 429 || (typeof errorMessage === 'string' && (\n    errorMessage.includes('Too many concurrent') ||\n    errorMessage.includes('too many requests') ||\n    errorMessage.includes('rateLimitExceeded') ||\n    errorMessage.includes('userRateLimitExceeded')\n  ))) {\n    console.warn('Gmail rate limited while marking as read; email was still processed.');\n    return {\n      success: false,\n      reason: 'rate_limited',\n      message: 'Gmail rate limited mark-as-read. Email was processed; may still show as unread.',\n      workflow_continues: true,\n      httpCode: httpCode || 429\n    };\n  }\n\n  // Other errors\n  console.error('Error marking email as read:', errorMessage);\n  return {\n    success: false,\n    reason: 'api_error',\n    message: errorMessage,\n    workflow_continues: true,\n    httpCode: httpCode\n  };\n}\n\n// Success case - check if we got a valid response\nif (markReadResult && !error && httpCode !== 403) {\n  console.log('✅ Email marked as read successfully');\n  return {\n    success: true,\n    message: 'Email marked as read successfully',\n    data: markReadResult\n  };\n}\n\n// Unknown state - log and continue\nconsole.warn('Unknown result from Mark Email as Read:', JSON.stringify(markReadResult, null, 2));\nreturn {\n  success: false,\n  reason: 'unknown',\n  message: 'Unknown result from mark as read operation',\n  workflow_continues: true,\n  raw_result: markReadResult\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
