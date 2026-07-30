@@ -7,15 +7,17 @@ from sqlalchemy import create_engine
 from config import settings
 
 # Async engine for FastAPI
+# Small pool by default — Render free Postgres rejects large connection pools and
+# OOMs when many Flow 1 jobs open sessions in parallel.
 async_engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True,
     pool_pre_ping=True,  # Verify connections before using
     pool_recycle=3600,   # Recycle connections after 1 hour
-    pool_timeout=30,     # Timeout when getting connection from pool (increased for high load)
-    pool_size=20,        # Base pool size (increased from default 5)
-    max_overflow=30,     # Maximum overflow connections (increased from 10)
+    pool_timeout=30,     # Timeout when getting connection from pool
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
     connect_args={
         "server_settings": {
             "application_name": "s_combinator_backend"

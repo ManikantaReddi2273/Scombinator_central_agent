@@ -32,7 +32,8 @@
               "responseFormat": "json",
               "fullResponse": false
             }
-          }
+          },
+          "timeout": 120000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -42,7 +43,10 @@
         300
       ],
       "id": "get-companies",
-      "name": "Get Companies with OAuth"
+      "name": "Get Companies with OAuth",
+      "retryOnFail": true,
+      "maxTries": 6,
+      "waitBetweenTries": 15000
     },
     {
       "parameters": {
@@ -84,7 +88,7 @@
               "fullResponse": false
             }
           },
-          "timeout": 30000,
+          "timeout": 90000,
           "allowUnauthorizedCerts": false
         }
       },
@@ -95,7 +99,10 @@
         300
       ],
       "id": "get-gmail-token",
-      "name": "Get Gmail Token from Database"
+      "name": "Get Gmail Token from Database",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 10000
     },
     {
       "parameters": {
@@ -172,7 +179,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Process each message ID and prepare for fetching full message details\n// This node processes all items at once to access data from previous nodes\n// Receives data from 'Has New Emails?' node (which passes through data from 'Check Gmail Inbox via API')\n\nconsole.log('=== Prepare Message IDs - Debug START ===');\n\n// Get all input items from Has New Emails? node (true branch)\n// This data comes from Check Gmail Inbox via API\nconst allItems = $input.all();\nconsole.log(`Received ${allItems.length} items from Has New Emails? (true branch)`);\n\nif (allItems.length === 0) {\n  console.warn('WARNING: No items received from Check Gmail Inbox via API');\n  return [];\n}\n\n// Log first item structure for debugging\nif (allItems.length > 0) {\n  console.log('First item structure:', JSON.stringify(allItems[0].json, null, 2));\n}\n\n// Get all items from Merge Token Data node\nlet allMergedData = [];\ntry {\n  allMergedData = $('Merge Token Data').all();\n  console.log(`Found ${allMergedData.length} items from Merge Token Data`);\n} catch (e) {\n  console.error('ERROR accessing Merge Token Data:', e.message);\n  throw new Error('Cannot access Merge Token Data node: ' + e.message);\n}\n\nif (allMergedData.length === 0) {\n  console.error('ERROR: No data from Merge Token Data node');\n  throw new Error('Merge Token Data node returned no items');\n}\n\nif (allMergedData.length !== allItems.length) {\n  console.warn(`Item count mismatch: ${allItems.length} Gmail responses vs ${allMergedData.length} companies`);\n  console.warn('Will match by index (item 0 with item 0, etc.)');\n}\n\nconst allProcessedMessages = [];\n\n// Process each item from Gmail API\nfor (let i = 0; i < allItems.length; i++) {\n  const messagesResponse = allItems[i].json;\n  const mergedData = allMergedData[i]?.json || allMergedData[0]?.json; // Fallback to first if count mismatch\n  \n  console.log(`\\n--- Processing item ${i} ---`);\n  console.log('Gmail response keys:', Object.keys(messagesResponse || {}));\n  console.log('Has messages property:', 'messages' in (messagesResponse || {}));\n  console.log('Messages value:', messagesResponse.messages);\n  console.log('Messages type:', typeof messagesResponse.messages);\n  console.log('Is array:', Array.isArray(messagesResponse.messages));\n  console.log('Messages count:', messagesResponse.messages?.length || 0);\n  console.log('Company name:', mergedData?.company_name);\n  \n  if (!mergedData) {\n    console.error(`ERROR: No company data found for item ${i}`);\n    continue;\n  }\n  \n  // Extract messages array from response\n  const messageIds = messagesResponse.messages || [];\n  \n  if (!Array.isArray(messageIds)) {\n    console.error(`ERROR: messages is not an array in item ${i}:`, typeof messageIds);\n    console.error('Full response:', JSON.stringify(messagesResponse, null, 2));\n    continue;\n  }\n  \n  if (messageIds.length === 0) {\n    console.log(`No messages found in item ${i} for ${mergedData.company_name} - skipping`);\n    continue;\n  }\n  \n  console.log(`Found ${messageIds.length} messages for ${mergedData.company_name}`);\n  \n  // Prepare data for each message ID\n  for (const msg of messageIds) {\n    const messageId = msg.id;\n    \n    if (!messageId) {\n      console.warn('Message missing ID:', msg);\n      continue;\n    }\n    \n    allProcessedMessages.push({\n      company_id: mergedData.company_id,\n      company_email: mergedData.company_email,\n      company_name: mergedData.company_name,\n      n8n_credential_id: mergedData.n8n_credential_id,\n      access_token: mergedData.access_token,\n      message_id: messageId\n    });\n  }\n  \n  console.log(`✓ Processed ${messageIds.length} messages for ${mergedData.company_name}`);\n}\n\nconsole.log(`\\n=== Prepare Message IDs - Debug END ===`);\nconsole.log(`Total: Found ${allProcessedMessages.length} messages to process across all companies`);\n\nif (allProcessedMessages.length === 0) {\n  console.log('No messages to process - returning empty array (this is OK if no unread emails)');\n  return [];\n}\n\n// Return array - n8n will automatically create one item per array element\nreturn allProcessedMessages;"
+        "jsCode": "// Process each message ID and prepare for fetching full message details\n// This node processes all items at once to access data from previous nodes\n// Receives data from 'Has New Emails?' node (which passes through data from 'Check Gmail Inbox via API')\n\nconsole.log('=== Prepare Message IDs - Debug START ===');\n\n// Get all input items from Has New Emails? node (true branch)\n// This data comes from Check Gmail Inbox via API\nconst allItems = $input.all();\nconsole.log(`Received ${allItems.length} items from Has New Emails? (true branch)`);\n\nif (allItems.length === 0) {\n  console.warn('WARNING: No items received from Check Gmail Inbox via API');\n  return [];\n}\n\n// Log first item structure for debugging\nif (allItems.length > 0) {\n  console.log('First item structure:', JSON.stringify(allItems[0].json, null, 2));\n}\n\n// Get all items from Merge Token Data node\nlet allMergedData = [];\ntry {\n  allMergedData = $('Merge Token Data').all();\n  console.log(`Found ${allMergedData.length} items from Merge Token Data`);\n} catch (e) {\n  console.error('ERROR accessing Merge Token Data:', e.message);\n  throw new Error('Cannot access Merge Token Data node: ' + e.message);\n}\n\nif (allMergedData.length === 0) {\n  console.error('ERROR: No data from Merge Token Data node');\n  throw new Error('Merge Token Data node returned no items');\n}\n\nif (allMergedData.length !== allItems.length) {\n  console.warn(`Item count mismatch: ${allItems.length} Gmail responses vs ${allMergedData.length} companies`);\n  console.warn('Will match by index (item 0 with item 0, etc.)');\n}\n\nlet allProcessedMessages = [];\n\n// Process each item from Gmail API\nfor (let i = 0; i < allItems.length; i++) {\n  const messagesResponse = allItems[i].json;\n  const mergedData = allMergedData[i]?.json || allMergedData[0]?.json; // Fallback to first if count mismatch\n  \n  console.log(`\\n--- Processing item ${i} ---`);\n  console.log('Gmail response keys:', Object.keys(messagesResponse || {}));\n  console.log('Has messages property:', 'messages' in (messagesResponse || {}));\n  console.log('Messages value:', messagesResponse.messages);\n  console.log('Messages type:', typeof messagesResponse.messages);\n  console.log('Is array:', Array.isArray(messagesResponse.messages));\n  console.log('Messages count:', messagesResponse.messages?.length || 0);\n  console.log('Company name:', mergedData?.company_name);\n  \n  if (!mergedData) {\n    console.error(`ERROR: No company data found for item ${i}`);\n    continue;\n  }\n  \n  // Extract messages array from response\n  const messageIds = messagesResponse.messages || [];\n  \n  if (!Array.isArray(messageIds)) {\n    console.error(`ERROR: messages is not an array in item ${i}:`, typeof messageIds);\n    console.error('Full response:', JSON.stringify(messagesResponse, null, 2));\n    continue;\n  }\n  \n  if (messageIds.length === 0) {\n    console.log(`No messages found in item ${i} for ${mergedData.company_name} - skipping`);\n    continue;\n  }\n  \n  console.log(`Found ${messageIds.length} messages for ${mergedData.company_name}`);\n  \n  // Prepare data for each message ID\n  for (const msg of messageIds) {\n    const messageId = msg.id;\n    \n    if (!messageId) {\n      console.warn('Message missing ID:', msg);\n      continue;\n    }\n    \n    allProcessedMessages.push({\n      company_id: mergedData.company_id,\n      company_email: mergedData.company_email,\n      company_name: mergedData.company_name,\n      n8n_credential_id: mergedData.n8n_credential_id,\n      access_token: mergedData.access_token,\n      message_id: messageId\n    });\n  }\n  \n  console.log(`✓ Processed ${messageIds.length} messages for ${mergedData.company_name}`);\n}\n\nconsole.log(`\\n=== Prepare Message IDs - Debug END ===`);\nconsole.log(`Total: Found ${allProcessedMessages.length} messages to process across all companies`);\n\nif (allProcessedMessages.length === 0) {\n  console.log('No messages to process - returning empty array (this is OK if no unread emails)');\n  return [];\n}\n\n// Return array - n8n will automatically create one item per array element\nconst MAX_EMAILS_PER_RUN = 3;\nif (allProcessedMessages.length > MAX_EMAILS_PER_RUN) {\n  console.log(`Capping to ${MAX_EMAILS_PER_RUN} emails this run (was ${allProcessedMessages.length}) to protect Render free tier`);\n  allProcessedMessages = allProcessedMessages.slice(0, MAX_EMAILS_PER_RUN);\n}\nreturn allProcessedMessages;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -271,7 +278,13 @@
               "fullResponse": false
             }
           },
-          "timeout": 60000
+          "timeout": 90000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 4000
+            }
+          }
         }
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -281,7 +294,10 @@
         200
       ],
       "id": "call-backend",
-      "name": "Call Backend API"
+      "name": "Call Backend API",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 8000
     },
     {
       "parameters": {
@@ -348,6 +364,35 @@
       ],
       "id": "handle-mark-read-result",
       "name": "Handle Mark Read Result"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://scombinator-backend.onrender.com/health",
+        "authentication": "none",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        350,
+        300
+      ],
+      "id": "warmup-backend",
+      "name": "Warm Up Backend",
+      "notes": "Wakes Render free tier before with-oauth. Retries on 502 cold start.",
+      "retryOnFail": true,
+      "maxTries": 6,
+      "waitBetweenTries": 15000,
+      "continueOnFail": true
     }
   ],
   "pinData": {},
@@ -356,7 +401,7 @@
       "main": [
         [
           {
-            "node": "Get Companies with OAuth",
+            "node": "Warm Up Backend",
             "type": "main",
             "index": 0
           }
@@ -498,6 +543,17 @@
     "Handle Mark Read Result": {
       "main": [
         []
+      ]
+    },
+    "Warm Up Backend": {
+      "main": [
+        [
+          {
+            "node": "Get Companies with OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },

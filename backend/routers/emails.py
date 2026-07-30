@@ -9,15 +9,13 @@ from database import get_db, AsyncSessionLocal
 from models.admin import Admin
 from schemas.email import EmailProcessRequest, EmailResponse
 from services.tenant import tenant_service
-from services.policy_loader import policy_loader_service
 from services.audit_logger import audit_logger_service
 from services.flow1 import Flow1Orchestrator
 from models.email import Email
-from models.draft import Draft
 from models.company import Company
 import uuid
+import asyncio
 import logging
-from datetime import datetime
 from typing import Optional, Dict, Any
 from auth.jwt import get_current_admin
 
@@ -25,48 +23,66 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/emails", tags=["Emails"])
 
+# One Flow 1 at a time — parallel OpenAI + LangGraph OOMs / 502s Render free tier
+_flow1_semaphore = asyncio.Semaphore(1)
 
-async def _process_email_background(company_id: str, email_payload: Dict[str, Any]) -> None:
+
+async def _process_email_background(
+    company_id: str,
+    email_payload: Dict[str, Any],
+    email_id: Optional[str] = None,
+) -> None:
     """
     Run Flow 1 in a fresh DB session after the HTTP response is sent.
-    Avoids Render free-tier 502s caused by long OpenAI/LangGraph request times.
+    Serialized so free-tier Render does not crash under concurrent AI jobs.
     """
-    async with AsyncSessionLocal() as db:
-        try:
-            orchestrator = Flow1Orchestrator()
-            result = await orchestrator.process_email(
-                db=db,
-                company_id=company_id,
-                email_data=email_payload,
-            )
+    async with _flow1_semaphore:
+        async with AsyncSessionLocal() as db:
             try:
-                await audit_logger_service.log_email_processed(
+                if email_id:
+                    email_payload = {**email_payload, "email_id": email_id}
+
+                orchestrator = Flow1Orchestrator()
+                result = await orchestrator.process_email(
                     db=db,
                     company_id=company_id,
-                    email_id=result.get("email_id"),
-                    classification_metadata=result.get("classification", {}),
+                    email_data=email_payload,
+                )
+                try:
+                    await audit_logger_service.log_email_processed(
+                        db=db,
+                        company_id=company_id,
+                        email_id=result.get("email_id"),
+                        classification_metadata=result.get("classification", {}),
+                    )
+                except Exception as e:
+                    logger.warning("Background audit log failed: %s", e)
+
+                email_id_str = result.get("email_id")
+                if email_id_str:
+                    try:
+                        from services.lead_replied_crm import record_lead_replied_if_applicable
+                        await record_lead_replied_if_applicable(db, email_id_str)
+                    except Exception as e:
+                        logger.warning("Could not record lead replied in CRM: %s", e)
+
+                await db.commit()
+                logger.info(
+                    "Background Flow 1 finished company=%s email_id=%s draft_id=%s status=%s",
+                    company_id,
+                    result.get("email_id"),
+                    result.get("draft_id"),
+                    result.get("status"),
                 )
             except Exception as e:
-                logger.warning("Background audit log failed: %s", e)
-
-            email_id_str = result.get("email_id")
-            if email_id_str:
-                try:
-                    from services.lead_replied_crm import record_lead_replied_if_applicable
-                    await record_lead_replied_if_applicable(db, email_id_str)
-                except Exception as e:
-                    logger.warning("Could not record lead replied in CRM: %s", e)
-
-            await db.commit()
-            logger.info(
-                "Background Flow 1 finished company=%s email_id=%s status=%s",
-                company_id,
-                result.get("email_id"),
-                result.get("status"),
-            )
-        except Exception as e:
-            await db.rollback()
-            logger.error("Background Flow 1 failed for company %s: %s", company_id, e, exc_info=True)
+                await db.rollback()
+                logger.error(
+                    "Background Flow 1 failed for company %s email_id=%s: %s",
+                    company_id,
+                    email_id,
+                    e,
+                    exc_info=True,
+                )
 
 
 @router.post("/process", response_model=dict)
@@ -78,8 +94,8 @@ async def process_email(
     """
     Accept an inbound email from n8n and process it with Flow 1.
 
-    Returns quickly (HTTP 202) so Render free-tier proxies do not 502 while
-    LangGraph + OpenAI run. AI work continues in a background task.
+    Persists a queued email row immediately, returns HTTP 202, then runs AI
+    in a single-file background queue (avoids Render free-tier 502/OOM).
     """
     email_data = email_request.email_data
     
@@ -142,11 +158,60 @@ async def process_email(
             }
     
     # Extract email data
-    subject = email_data.get("subject", "")
-    body = email_data.get("body", "")
-    from_email = email_data.get("from", "")
-    to_email = email_data.get("to", "")
+    subject = email_data.get("subject", "") or "(No Subject)"
+    body = email_data.get("body", "") or ""
+    from_email = email_data.get("from", "") or "unknown@unknown"
+    to_email = email_data.get("to", "") or ""
     thread_id = email_data.get("thread_id")
+
+    # Persist stub immediately so every accepted email is visible and Flow 1 can update it
+    queued = Email(
+        id=uuid.uuid4(),
+        company_id=uuid.UUID(company_id),
+        subject=subject[:500],
+        body=body,
+        from_email=from_email[:255],
+        to_email=to_email[:255] if to_email else "unknown@unknown",
+        thread_id=thread_id,
+        gmail_message_id=gmail_message_id,
+        function="Admin",
+        intent="Inquiry",
+        urgency="Can wait",
+        impact="Low",
+        confidence="Missing info",
+        priority_score="0",
+        executive_summary="Queued for AI processing",
+        recommended_action=None,
+        classification_metadata={"status": "queued"},
+        email_type="inbound",
+    )
+    try:
+        db.add(queued)
+        await db.flush()
+        await db.refresh(queued)
+        queued_email_id = str(queued.id)
+        # Commit before background task so the stub row is visible to Flow 1
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        # Race: another worker inserted the same gmail_message_id
+        if gmail_message_id:
+            existing_result = await db.execute(
+                select(Email).where(Email.gmail_message_id == gmail_message_id)
+            )
+            existing = existing_result.scalar_one_or_none()
+            if existing:
+                return {
+                    "email_id": str(existing.id),
+                    "company_id": company_id,
+                    "status": "duplicate",
+                    "message": "Email already processed",
+                }
+        logger.error("Failed to queue email stub: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to queue email: {e}",
+        )
 
     email_payload = {
         "subject": subject,
@@ -155,14 +220,21 @@ async def process_email(
         "to": to_email,
         "thread_id": thread_id,
         "gmail_message_id": gmail_message_id,
+        "email_id": queued_email_id,
     }
 
     # Queue AI pipeline after response — prevents Render free-tier gateway timeouts
-    background_tasks.add_task(_process_email_background, company_id, email_payload)
+    background_tasks.add_task(
+        _process_email_background,
+        company_id,
+        email_payload,
+        queued_email_id,
+    )
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={
+            "email_id": queued_email_id,
             "company_id": company_id,
             "status": "accepted",
             "gmail_message_id": gmail_message_id,
@@ -344,4 +416,3 @@ async def get_email(
         recommended_action=email.recommended_action,
         created_at=email.created_at
     )
-

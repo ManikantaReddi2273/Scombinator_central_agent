@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
     LANGRAPH_CHECKPOINT_DB_URL: str
+    # Keep small on Render free (limited Postgres connections + 512MB RAM)
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
     
     # JWT
     JWT_SECRET_KEY: str

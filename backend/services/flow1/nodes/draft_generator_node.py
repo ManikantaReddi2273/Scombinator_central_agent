@@ -125,8 +125,9 @@ async def draft_generator_node(state: Flow1State, config=None) -> Dict:
     # Generate draft for multiple action types, not just "Reply with template"
     recommended_action = state.get("recommended_action")
     
-    # Only skip draft generation for these actions
-    skip_draft_actions = ["Escalate to human", "Hold/Ignore", "Review resume"]
+    # Only skip when we truly should not reply. Escalate / Review resume still get
+    # a draft so every inbound email surfaces something in the dashboard.
+    skip_draft_actions = ["Hold/Ignore"]
     if recommended_action in skip_draft_actions:
         return {
             "draft_subject": None,

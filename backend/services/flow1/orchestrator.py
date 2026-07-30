@@ -148,7 +148,7 @@ class Flow1Orchestrator:
             variables_used=None,
             
             # Step 7: Metadata
-            email_id=None,
+            email_id=email_data.get("email_id"),
             draft_id=None,
             status="processing",
             error_message=None,
@@ -175,10 +175,22 @@ class Flow1Orchestrator:
         # Convert company_id to UUID if needed
         company_id_uuid = UUID(state["company_id"]) if isinstance(state["company_id"], str) else state["company_id"]
         
-        # CRITICAL: Check for duplicate gmail_message_id BEFORE inserting
-        # This prevents most duplicate inserts, but race conditions can still occur
         gmail_message_id = state.get("gmail_message_id")
-        if gmail_message_id:
+        queued_email_id = state.get("email_id")  # Stub created by /process before Flow 1
+
+        # Prefer updating the queued stub so every accepted email gets AI fields + draft
+        email_record = None
+        if queued_email_id:
+            try:
+                existing_result = await db.execute(
+                    select(Email).where(Email.id == UUID(str(queued_email_id)))
+                )
+                email_record = existing_result.scalar_one_or_none()
+            except Exception as e:
+                logger.warning("Could not load queued email %s: %s", queued_email_id, e)
+
+        # CRITICAL: Check for duplicate gmail_message_id BEFORE inserting
+        if email_record is None and gmail_message_id:
             try:
                 # Use selectinload to eagerly load drafts if they exist
                 from sqlalchemy.orm import selectinload
@@ -196,104 +208,150 @@ class Flow1Orchestrator:
                     draft_id = None
                     if existing.drafts and len(existing.drafts) > 0:
                         draft_id = str(existing.drafts[0].id)
-                    return {
-                        "email_id": email_id,
-                        "draft_id": draft_id,
-                        "status": "duplicate_skipped"
-                    }
+                    # If duplicate has no draft yet but we generated one, fall through to create draft on this row
+                    if draft_id or not state.get("draft_body"):
+                        return {
+                            "email_id": email_id,
+                            "draft_id": draft_id,
+                            "status": "duplicate_skipped"
+                        }
+                    email_record = existing
             except Exception as e:
                 logger.warning(f"Error checking for duplicate email: {str(e)}, proceeding with insert")
         
-        # Create email record
-        email_record = Email(
-            id=uuid4(),
-            company_id=company_id_uuid,
-            subject=state["email_subject"],
-            body=state["email_body"],
-            from_email=state["from_email"],
-            to_email=state["to_email"],
-            thread_id=state.get("thread_id"),
-            gmail_message_id=gmail_message_id,
-            # Classification fields
-            function=state.get("function", "Admin"),
-            intent=state.get("intent", "Inquiry"),
-            urgency=state.get("urgency", "Can wait"),
-            impact=state.get("impact", "Low"),
-            confidence=state.get("confidence", "Missing info"),
-            priority_score=str(state.get("priority_score", 50)),
-            executive_summary=state.get("executive_summary"),
-            recommended_action=state.get("recommended_action"),
-            classification_metadata=state.get("classification_metadata") or {}
-        )
-        # If this is a reply in a thread, attach lead_id and lead_source from thread root (outbound B2B/B2C) for CRM updates
-        thread_id = state.get("thread_id")
-        if thread_id:
-            lead_id, lead_source = await get_lead_id_and_source_from_thread_root(db, state["company_id"], thread_id)
-            if lead_id:
-                email_record.recipient_context = {"lead_id": lead_id, "lead_source": lead_source or "b2b"}
-                logger.info("Inbound reply in thread: attached lead_id=%s lead_source=%s from thread root", lead_id, lead_source or "b2b")
-
-        try:
-            db.add(email_record)
+        if email_record is not None:
+            # Update queued / existing row with Flow 1 results
+            email_record.subject = state["email_subject"]
+            email_record.body = state["email_body"]
+            email_record.from_email = state["from_email"]
+            email_record.to_email = state["to_email"]
+            email_record.thread_id = state.get("thread_id")
+            if gmail_message_id:
+                email_record.gmail_message_id = gmail_message_id
+            email_record.function = state.get("function", "Admin")
+            email_record.intent = state.get("intent", "Inquiry")
+            email_record.urgency = state.get("urgency", "Can wait")
+            email_record.impact = state.get("impact", "Low")
+            email_record.confidence = state.get("confidence", "Missing info")
+            email_record.priority_score = str(state.get("priority_score", 50))
+            email_record.executive_summary = state.get("executive_summary")
+            email_record.recommended_action = state.get("recommended_action")
+            email_record.classification_metadata = state.get("classification_metadata") or {}
+            thread_id = state.get("thread_id")
+            if thread_id:
+                lead_id, lead_source = await get_lead_id_and_source_from_thread_root(db, state["company_id"], thread_id)
+                if lead_id:
+                    email_record.recipient_context = {"lead_id": lead_id, "lead_source": lead_source or "b2b"}
             await db.commit()
             await db.refresh(email_record)
             email_id = str(email_record.id)
-        except IntegrityError as e:
-            # Handle race condition: another process inserted the same email
-            await db.rollback()
-            logger.warning(f"IntegrityError during email insert (likely duplicate): {str(e)}")
-            
-            # Try to find the existing email after rollback
-            # After rollback, the session should still be usable for queries
-            if gmail_message_id:
-                try:
-                    # Query for existing email - this should work after rollback
-                    existing_result = await db.execute(
-                        select(Email).where(Email.gmail_message_id == gmail_message_id)
-                    )
-                    existing = existing_result.scalar_one_or_none()
-                    if existing:
-                        logger.info(f"Found existing email after IntegrityError: email_id={existing.id}")
-                        email_id = str(existing.id)
-                        draft_id = None
-                        # Try to access drafts - they might be lazy loaded
-                        try:
-                            # Use selectinload to ensure drafts are loaded
-                            from sqlalchemy.orm import selectinload
-                            existing_result_with_drafts = await db.execute(
-                                select(Email)
-                                .options(selectinload(Email.drafts))
-                                .where(Email.gmail_message_id == gmail_message_id)
-                            )
-                            existing_with_drafts = existing_result_with_drafts.scalar_one_or_none()
-                            if existing_with_drafts and existing_with_drafts.drafts:
-                                draft_id = str(existing_with_drafts.drafts[0].id)
-                        except Exception as draft_error:
-                            logger.debug(f"Could not load drafts for existing email: {str(draft_error)}")
-                            # That's OK, draft_id will remain None
-                        
-                        return {
-                            "email_id": email_id,
-                            "draft_id": draft_id
-                        }
-                except Exception as lookup_error:
-                    logger.error(f"Error looking up existing email after IntegrityError: {str(lookup_error)}")
-            
-            # If we can't find existing, return success anyway to prevent workflow failure
-            # The email was already processed by another request, so this is not really an error
-            logger.info(f"Duplicate email detected (gmail_message_id={gmail_message_id}) - email was already processed. Returning success to prevent workflow failure.")
-            return {
-                "email_id": None,  # We don't know the ID, but that's OK
-                "draft_id": None,
-                "status": "duplicate_skipped",
-                "message": f"Email with gmail_message_id={gmail_message_id} was already processed"
-            }
+        else:
+            # Create email record
+            email_record = Email(
+                id=uuid4(),
+                company_id=company_id_uuid,
+                subject=state["email_subject"],
+                body=state["email_body"],
+                from_email=state["from_email"],
+                to_email=state["to_email"],
+                thread_id=state.get("thread_id"),
+                gmail_message_id=gmail_message_id,
+                # Classification fields
+                function=state.get("function", "Admin"),
+                intent=state.get("intent", "Inquiry"),
+                urgency=state.get("urgency", "Can wait"),
+                impact=state.get("impact", "Low"),
+                confidence=state.get("confidence", "Missing info"),
+                priority_score=str(state.get("priority_score", 50)),
+                executive_summary=state.get("executive_summary"),
+                recommended_action=state.get("recommended_action"),
+                classification_metadata=state.get("classification_metadata") or {}
+            )
+            # If this is a reply in a thread, attach lead_id and lead_source from thread root (outbound B2B/B2C) for CRM updates
+            thread_id = state.get("thread_id")
+            if thread_id:
+                lead_id, lead_source = await get_lead_id_and_source_from_thread_root(db, state["company_id"], thread_id)
+                if lead_id:
+                    email_record.recipient_context = {"lead_id": lead_id, "lead_source": lead_source or "b2b"}
+                    logger.info("Inbound reply in thread: attached lead_id=%s lead_source=%s from thread root", lead_id, lead_source or "b2b")
+
+            try:
+                db.add(email_record)
+                await db.commit()
+                await db.refresh(email_record)
+                email_id = str(email_record.id)
+            except IntegrityError as e:
+                # Handle race condition: another process inserted the same email
+                await db.rollback()
+                logger.warning(f"IntegrityError during email insert (likely duplicate): {str(e)}")
+                
+                # Try to find the existing email after rollback
+                # After rollback, the session should still be usable for queries
+                if gmail_message_id:
+                    try:
+                        # Query for existing email - this should work after rollback
+                        existing_result = await db.execute(
+                            select(Email).where(Email.gmail_message_id == gmail_message_id)
+                        )
+                        existing = existing_result.scalar_one_or_none()
+                        if existing:
+                            logger.info(f"Found existing email after IntegrityError: email_id={existing.id}")
+                            email_id = str(existing.id)
+                            draft_id = None
+                            # Try to access drafts - they might be lazy loaded
+                            try:
+                                # Use selectinload to ensure drafts are loaded
+                                from sqlalchemy.orm import selectinload
+                                existing_result_with_drafts = await db.execute(
+                                    select(Email)
+                                    .options(selectinload(Email.drafts))
+                                    .where(Email.gmail_message_id == gmail_message_id)
+                                )
+                                existing_with_drafts = existing_result_with_drafts.scalar_one_or_none()
+                                if existing_with_drafts and existing_with_drafts.drafts:
+                                    draft_id = str(existing_with_drafts.drafts[0].id)
+                            except Exception as draft_error:
+                                logger.debug(f"Could not load drafts for existing email: {str(draft_error)}")
+                                # That's OK, draft_id will remain None
+                            
+                            return {
+                                "email_id": email_id,
+                                "draft_id": draft_id
+                            }
+                    except Exception as lookup_error:
+                        logger.error(f"Error looking up existing email after IntegrityError: {str(lookup_error)}")
+                
+                # If we can't find existing, return success anyway to prevent workflow failure
+                # The email was already processed by another request, so this is not really an error
+                logger.info(f"Duplicate email detected (gmail_message_id={gmail_message_id}) - email was already processed. Returning success to prevent workflow failure.")
+                return {
+                    "email_id": None,  # We don't know the ID, but that's OK
+                    "draft_id": None,
+                    "status": "duplicate_skipped",
+                    "message": f"Email with gmail_message_id={gmail_message_id} was already processed"
+                }
         
-        # Create draft if generated (for any action that produces a draft)
+        # Skip creating a second draft if one already exists
+        try:
+            from sqlalchemy.orm import selectinload
+            existing_drafts_result = await db.execute(
+                select(Email)
+                .options(selectinload(Email.drafts))
+                .where(Email.id == email_record.id)
+            )
+            existing_with_drafts = existing_drafts_result.scalar_one_or_none()
+            if existing_with_drafts and existing_with_drafts.drafts:
+                return {
+                    "email_id": str(email_record.id),
+                    "draft_id": str(existing_with_drafts.drafts[0].id),
+                    "status": "draft_exists"
+                }
+        except Exception:
+            pass
+
+        # Persist draft whenever Flow 1 produced body text (all reply-worthy actions)
         draft_id = None
-        draft_action = state.get("recommended_action")
-        # Generate draft for: "Reply with template", "Ask for missing information", "Schedule meeting"
-        if state.get("draft_body") and draft_action in ["Reply with template", "Ask for missing information", "Schedule meeting"]:
+        if state.get("draft_body"):
             try:
                 draft = Draft(
                     id=uuid4(),
@@ -391,48 +449,44 @@ class Flow1Orchestrator:
             
             # Try to save partial results if possible
             try:
-                # Don't await here - we're in error handling, just create a simple dict
-                error_state = {
-                    "company_id": company_id,
-                    "email_subject": email_data.get("subject", ""),
-                    "email_body": email_data.get("body", ""),
-                    "from_email": email_data.get("from", ""),
-                    "to_email": email_data.get("to", ""),
-                    "thread_id": email_data.get("thread_id"),
-                    "gmail_message_id": email_data.get("gmail_message_id"),
-                    "thread_history": [],
-                    "thread_count": 0,
-                    "status": "error",
-                    "error_message": str(e)
-                }
-                
-                # Convert company_id to UUID if needed
                 company_id_uuid = UUID(company_id) if isinstance(company_id, str) else company_id
-                
-                # Save email record with error status
-                email_record = Email(
-                    id=uuid4(),
-                    company_id=company_id_uuid,
-                    subject=email_data.get("subject", ""),
-                    body=email_data.get("body", ""),
-                    from_email=email_data.get("from", ""),
-                    to_email=email_data.get("to", ""),
-                    thread_id=email_data.get("thread_id"),
-                    gmail_message_id=email_data.get("gmail_message_id"),
-                    function="Admin",
-                    intent="Inquiry",
-                    urgency="Can wait",
-                    impact="Low",
-                    confidence="Missing info",
-                    priority_score="50",
-                    executive_summary=f"Error processing email: {str(e)}",
-                    recommended_action="Escalate to human",
-                    classification_metadata={"error": str(e)}
-                )
-                
-                db.add(email_record)
-                await db.commit()
-                await db.refresh(email_record)
+                queued_id = email_data.get("email_id")
+                email_record = None
+                if queued_id:
+                    existing_result = await db.execute(
+                        select(Email).where(Email.id == UUID(str(queued_id)))
+                    )
+                    email_record = existing_result.scalar_one_or_none()
+
+                if email_record is not None:
+                    email_record.executive_summary = f"Error processing email: {str(e)}"
+                    email_record.recommended_action = "Escalate to human"
+                    email_record.classification_metadata = {"error": str(e)}
+                    await db.commit()
+                    await db.refresh(email_record)
+                else:
+                    email_record = Email(
+                        id=uuid4(),
+                        company_id=company_id_uuid,
+                        subject=email_data.get("subject", ""),
+                        body=email_data.get("body", ""),
+                        from_email=email_data.get("from", ""),
+                        to_email=email_data.get("to", ""),
+                        thread_id=email_data.get("thread_id"),
+                        gmail_message_id=email_data.get("gmail_message_id"),
+                        function="Admin",
+                        intent="Inquiry",
+                        urgency="Can wait",
+                        impact="Low",
+                        confidence="Missing info",
+                        priority_score="50",
+                        executive_summary=f"Error processing email: {str(e)}",
+                        recommended_action="Escalate to human",
+                        classification_metadata={"error": str(e)}
+                    )
+                    db.add(email_record)
+                    await db.commit()
+                    await db.refresh(email_record)
                 
                 return {
                     "email_id": str(email_record.id),

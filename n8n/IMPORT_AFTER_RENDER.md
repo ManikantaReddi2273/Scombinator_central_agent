@@ -31,7 +31,9 @@ In n8n: **Workflows → Import from File** → select each JSON → **Activate**
 
 ## Notes
 
-- Free Render apps sleep when idle; first n8n call may take 30–60s.
+- Free Render apps sleep when idle; first n8n call may take 30–60s. **Email Ingestion** now has a **Warm Up Backend** node + retries on 502.
 - Keep this PC + Docker running for automation to work.
 - OAuth for companies on Render: use the dashboard **Connect Gmail & Drive** (backend), not this n8n OAuth workflow.
 - If you change the Render backend URL, search-replace `scombinator-backend.onrender.com` in these JSON files and re-import (or edit nodes in n8n).
+- After a successful `Call Backend API` (HTTP 202), wait 1–3 minutes for drafts — AI runs in the background, one email at a time. Check **Drafts** / **Priority Queue** on the frontend.
+- Re-import `Email Ingestion.json` after pulling these fixes (disk JSON does not update already-imported workflows).
