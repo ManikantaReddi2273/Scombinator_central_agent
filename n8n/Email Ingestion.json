@@ -262,7 +262,7 @@
               "fullResponse": false
             }
           },
-          "timeout": 120000
+          "timeout": 60000
         }
       },
       "type": "n8n-nodes-base.httpRequest",

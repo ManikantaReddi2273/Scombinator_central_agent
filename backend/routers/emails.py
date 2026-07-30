@@ -1,10 +1,11 @@
 """
 Email processing routes
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-from database import get_db
+from database import get_db, AsyncSessionLocal
 from models.admin import Admin
 from schemas.email import EmailProcessRequest, EmailResponse
 from services.tenant import tenant_service
@@ -17,7 +18,7 @@ from models.company import Company
 import uuid
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from auth.jwt import get_current_admin
 
 logger = logging.getLogger(__name__)
@@ -25,19 +26,60 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/emails", tags=["Emails"])
 
 
+async def _process_email_background(company_id: str, email_payload: Dict[str, Any]) -> None:
+    """
+    Run Flow 1 in a fresh DB session after the HTTP response is sent.
+    Avoids Render free-tier 502s caused by long OpenAI/LangGraph request times.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            orchestrator = Flow1Orchestrator()
+            result = await orchestrator.process_email(
+                db=db,
+                company_id=company_id,
+                email_data=email_payload,
+            )
+            try:
+                await audit_logger_service.log_email_processed(
+                    db=db,
+                    company_id=company_id,
+                    email_id=result.get("email_id"),
+                    classification_metadata=result.get("classification", {}),
+                )
+            except Exception as e:
+                logger.warning("Background audit log failed: %s", e)
+
+            email_id_str = result.get("email_id")
+            if email_id_str:
+                try:
+                    from services.lead_replied_crm import record_lead_replied_if_applicable
+                    await record_lead_replied_if_applicable(db, email_id_str)
+                except Exception as e:
+                    logger.warning("Could not record lead replied in CRM: %s", e)
+
+            await db.commit()
+            logger.info(
+                "Background Flow 1 finished company=%s email_id=%s status=%s",
+                company_id,
+                result.get("email_id"),
+                result.get("status"),
+            )
+        except Exception as e:
+            await db.rollback()
+            logger.error("Background Flow 1 failed for company %s: %s", company_id, e, exc_info=True)
+
+
 @router.post("/process", response_model=dict)
 async def process_email(
     email_request: EmailProcessRequest,
-    db: AsyncSession = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ):
     """
-    Process incoming email (called by n8n)
-    This endpoint:
-    1. Maps credential_id to company_id
-    2. Checks for duplicate emails (gmail_message_id)
-    3. Creates email record
-    4. Runs classification agents (Phase 2+)
-    5. Creates draft if needed (Phase 5+)
+    Accept an inbound email from n8n and process it with Flow 1.
+
+    Returns quickly (HTTP 202) so Render free-tier proxies do not 502 while
+    LangGraph + OpenAI run. AI work continues in a background task.
     """
     email_data = email_request.email_data
     
@@ -105,73 +147,31 @@ async def process_email(
     from_email = email_data.get("from", "")
     to_email = email_data.get("to", "")
     thread_id = email_data.get("thread_id")
-    
-    # Process email through Flow 1 LangGraph workflow
-    orchestrator = Flow1Orchestrator()
-    
-    try:
-        result = await orchestrator.process_email(
-            db=db,
-            company_id=company_id,
-            email_data={
-                "subject": subject,
-                "body": body,
-                "from": from_email,
-                "to": to_email,
-                "thread_id": thread_id,
-                "gmail_message_id": gmail_message_id
-            }
-        )
-        
-        # Log email processing (non-blocking - don't fail if logging fails)
-        try:
-            await audit_logger_service.log_email_processed(
-                db=db,
-                company_id=company_id,
-                email_id=result["email_id"],
-                classification_metadata=result.get("classification", {})
-            )
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Error logging email processing: {str(e)}")
-        
-        # Handle duplicate_skipped status gracefully
-        if result.get("status") == "duplicate_skipped":
-            return {
-                "email_id": result.get("email_id"),
-                "draft_id": result.get("draft_id"),
-                "status": "duplicate",
-                "message": result.get("message", "Email was already processed")
-            }
-        
-        email_id_str = result.get("email_id")
-        if email_id_str:
-            try:
-                from services.lead_replied_crm import record_lead_replied_if_applicable
-                await record_lead_replied_if_applicable(db, email_id_str)
-            except Exception as e:
-                logger.warning("Could not record lead replied in CRM: %s", e)
-        
-        return {
-            "email_id": result["email_id"],
-            "draft_id": result.get("draft_id"),
+
+    email_payload = {
+        "subject": subject,
+        "body": body,
+        "from": from_email,
+        "to": to_email,
+        "thread_id": thread_id,
+        "gmail_message_id": gmail_message_id,
+    }
+
+    # Queue AI pipeline after response — prevents Render free-tier gateway timeouts
+    background_tasks.add_task(_process_email_background, company_id, email_payload)
+
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={
             "company_id": company_id,
-            "status": result.get("status", "processed"),
-            "classification": result.get("classification", {}),
-            "executive_summary": result.get("executive_summary"),
-            "recommended_action": result.get("recommended_action"),
-            "message": "Email processed successfully"
-        }
-        
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error processing email through Flow 1: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing email: {str(e)}"
-        )
+            "status": "accepted",
+            "gmail_message_id": gmail_message_id,
+            "message": (
+                "Email accepted for AI processing. "
+                "Classification and draft will appear in the dashboard shortly."
+            ),
+        },
+    )
 
 
 @router.get("/priority-queue", response_model=list[dict])
