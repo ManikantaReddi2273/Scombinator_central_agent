@@ -9,6 +9,34 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import OutboundB2CCreateModal from '../components/OutboundB2CCreateModal'
 
+type Company = { company_id: string; name: string }
+
+async function fetchB2CLeadsForCompanies(companies: Company[], companyId: string | null) {
+  const targets = companyId
+    ? companies.filter((c) => c.company_id === companyId)
+    : companies
+
+  if (targets.length === 0) return []
+
+  const results = await Promise.all(
+    targets.map(async (company) => {
+      try {
+        const res = await outboundAPI.getB2CLeads(company.company_id)
+        const leads = Array.isArray(res.data) ? res.data : []
+        return leads.map((lead: any) => ({
+          ...lead,
+          company_id: lead.company_id || company.company_id,
+          company_name: company.name,
+        }))
+      } catch {
+        return []
+      }
+    })
+  )
+
+  return results.flat()
+}
+
 export default function OutboundB2C() {
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [selectedLead, setSelectedLead] = useState<any>(null)
@@ -22,12 +50,9 @@ export default function OutboundB2C() {
   })
 
   const { data: leads, isLoading } = useQuery({
-    queryKey: ['b2c-leads', selectedCompany],
-    queryFn: () => {
-      if (!selectedCompany) return Promise.resolve([])
-      return outboundAPI.getB2CLeads(selectedCompany).then((res) => res.data)
-    },
-    enabled: !!selectedCompany,
+    queryKey: ['b2c-leads', selectedCompany, companies?.map((c: Company) => c.company_id)],
+    queryFn: () => fetchB2CLeadsForCompanies(companies || [], selectedCompany),
+    enabled: Array.isArray(companies) && companies.length > 0,
   })
 
   const stoppedStatus = 'No Response – Outreach Stopped'
@@ -52,6 +77,8 @@ export default function OutboundB2C() {
   }
 
   const b2cLeadId = (lead: any) => lead?.B2C_Lead_ID ?? lead?.b2c_lead_id ?? ''
+  const leadCompanyId = (lead: any) =>
+    selectedCompany || lead?.company_id || ''
 
   return (
     <div className="space-y-6">
@@ -90,25 +117,18 @@ export default function OutboundB2C() {
         </CardContent>
       </Card>
 
-      {!selectedCompany ? (
-        <Card className="bg-white border-gray-200">
-          <CardContent className="p-12 text-center">
-            <Users className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-500">Select a company to view B2C leads</p>
-          </CardContent>
-        </Card>
-      ) : isLoading ? (
+      {isLoading ? (
         <Card className="bg-white border-gray-200">
           <CardContent className="p-12 text-center">
             <Loader2 className="w-8 h-8 mx-auto text-gray-400 mb-4 animate-spin" />
             <p className="text-gray-500">Loading B2C leads...</p>
           </CardContent>
         </Card>
-      ) : leads?.length > 0 ? (
+      ) : leads && leads.length > 0 ? (
         <div className="space-y-3">
           {leads.map((lead: any) => (
             <Card
-              key={b2cLeadId(lead)}
+              key={`${lead.company_id}-${b2cLeadId(lead)}`}
               className="bg-white border-gray-200 hover:border-gray-300 transition-colors shadow-sm"
             >
               <CardContent className="p-6">
@@ -124,6 +144,7 @@ export default function OutboundB2C() {
                             <Mail className="w-4 h-4" />
                             {lead.Email}
                           </div>
+                          {lead.company_name && <span>Company: {lead.company_name}</span>}
                           {lead.Source && <span>Source: {lead.Source}</span>}
                           {lead.Campaign && <span>Campaign: {lead.Campaign}</span>}
                           {lead.Last_Activity_Date && (
@@ -133,6 +154,11 @@ export default function OutboundB2C() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap mb-3">
+                      {!selectedCompany && lead.company_name && (
+                        <Badge variant="outline" className="border-blue-300 text-blue-700">
+                          {lead.company_name}
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="border-gray-300 text-gray-700">
                         {lead.Stage ?? '—'}
                       </Badge>
@@ -185,7 +211,9 @@ export default function OutboundB2C() {
         <Card className="bg-white border-gray-200">
           <CardContent className="p-12 text-center">
             <Users className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-500">No B2C leads for this company</p>
+            <p className="text-gray-500">
+              {selectedCompany ? 'No B2C leads for this company' : 'No B2C leads found'}
+            </p>
             <p className="text-sm text-gray-400 mt-2">
               Ensure the CRM workbook has a B2C_FUNNEL worksheet with columns: B2C_Lead_ID, Name, Email, Source, Campaign_id, Campaign, Stage, Notes, Follow_Up_Count, etc.
             </p>
@@ -193,10 +221,10 @@ export default function OutboundB2C() {
         </Card>
       )}
 
-      {showCreateModal && selectedLead && (
+      {showCreateModal && selectedLead && leadCompanyId(selectedLead) && (
         <OutboundB2CCreateModal
           lead={selectedLead}
-          companyId={selectedCompany!}
+          companyId={leadCompanyId(selectedLead)}
           onClose={handleModalClose}
           onSuccess={handleCreateSuccess}
         />

@@ -1,6 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { outboundAPI, companiesAPI } from '../lib/api'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { formatDate } from '../lib/utils'
@@ -9,6 +9,34 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import OutboundCreateModal from '../components/OutboundCreateModal'
 
+type Company = { company_id: string; name: string }
+
+async function fetchB2BLeadsForCompanies(companies: Company[], companyId: string | null) {
+  const targets = companyId
+    ? companies.filter((c) => c.company_id === companyId)
+    : companies
+
+  if (targets.length === 0) return []
+
+  const results = await Promise.all(
+    targets.map(async (company) => {
+      try {
+        const res = await outboundAPI.getB2BLeads(company.company_id)
+        const leads = Array.isArray(res.data) ? res.data : []
+        return leads.map((lead: any) => ({
+          ...lead,
+          company_id: lead.company_id || company.company_id,
+          company_name: company.name,
+        }))
+      } catch {
+        return []
+      }
+    })
+  )
+
+  return results.flat()
+}
+
 export default function OutboundB2B() {
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [selectedLead, setSelectedLead] = useState<any>(null)
@@ -16,22 +44,15 @@ export default function OutboundB2B() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  // Fetch companies
   const { data: companies } = useQuery({
     queryKey: ['companies'],
     queryFn: () => companiesAPI.list().then((res) => res.data),
   })
 
-  // Fetch B2B leads
   const { data: leads, isLoading } = useQuery({
-    queryKey: ['b2b-leads', selectedCompany],
-    queryFn: () => {
-      if (!selectedCompany) {
-        return Promise.resolve([])
-      }
-      return outboundAPI.getB2BLeads(selectedCompany).then((res) => res.data)
-    },
-    enabled: !!selectedCompany,
+    queryKey: ['b2b-leads', selectedCompany, companies?.map((c: Company) => c.company_id)],
+    queryFn: () => fetchB2BLeadsForCompanies(companies || [], selectedCompany),
+    enabled: Array.isArray(companies) && companies.length > 0,
   })
 
   const isOutreachStopped = (lead: any) =>
@@ -54,6 +75,9 @@ export default function OutboundB2B() {
     navigate(`/drafts?draft=${draftId}`)
   }
 
+  const leadCompanyId = (lead: any) =>
+    selectedCompany || lead?.company_id || ''
+
   return (
     <div className="space-y-6">
       <div>
@@ -61,7 +85,6 @@ export default function OutboundB2B() {
         <p className="text-gray-600">Manage B2B leads and send outbound emails</p>
       </div>
 
-      {/* Company Selector */}
       <Card className="bg-white border-gray-200 shadow-sm">
         <CardContent className="p-4">
           <div className="flex items-center gap-4 flex-wrap">
@@ -90,26 +113,18 @@ export default function OutboundB2B() {
         </CardContent>
       </Card>
 
-      {/* Leads List */}
-      {!selectedCompany ? (
-        <Card className="bg-white border-gray-200">
-          <CardContent className="p-12 text-center">
-            <Building2 className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-500">Please select a company to view leads</p>
-          </CardContent>
-        </Card>
-      ) : isLoading ? (
+      {isLoading ? (
         <Card className="bg-white border-gray-200">
           <CardContent className="p-12 text-center">
             <Loader2 className="w-8 h-8 mx-auto text-gray-400 mb-4 animate-spin" />
             <p className="text-gray-500">Loading leads...</p>
           </CardContent>
         </Card>
-      ) : leads?.length > 0 ? (
+      ) : leads && leads.length > 0 ? (
         <div className="space-y-3">
           {leads.map((lead: any) => (
             <Card
-              key={lead.Lead_ID}
+              key={`${lead.company_id}-${lead.Lead_ID}`}
               className="bg-white border-gray-200 hover:border-gray-300 transition-colors shadow-sm"
             >
               <CardContent className="p-6">
@@ -125,6 +140,7 @@ export default function OutboundB2B() {
                             <Mail className="w-4 h-4" />
                             {lead.Email}
                           </div>
+                          {lead.company_name && <span>Workspace: {lead.company_name}</span>}
                           <span>Contact: {lead.Contact_Name}</span>
                           {lead.Role && <span>Role: {lead.Role}</span>}
                           {lead.Last_Activity_Date && (
@@ -134,6 +150,11 @@ export default function OutboundB2B() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap mb-3">
+                      {!selectedCompany && lead.company_name && (
+                        <Badge variant="outline" className="border-blue-300 text-blue-700">
+                          {lead.company_name}
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="border-gray-300 text-gray-700">
                         {lead.Stage || 'No Stage'}
                       </Badge>
@@ -198,7 +219,9 @@ export default function OutboundB2B() {
         <Card className="bg-white border-gray-200">
           <CardContent className="p-12 text-center">
             <Building2 className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-500">No B2B leads found for this company</p>
+            <p className="text-gray-500">
+              {selectedCompany ? 'No B2B leads found for this company' : 'No B2B leads found'}
+            </p>
             <p className="text-sm text-gray-400 mt-2">
               Make sure CRM/LEADS.xlsx exists in the company's Google Drive folder
             </p>
@@ -206,11 +229,10 @@ export default function OutboundB2B() {
         </Card>
       )}
 
-      {/* Create Modal */}
-      {showCreateModal && selectedLead && (
+      {showCreateModal && selectedLead && leadCompanyId(selectedLead) && (
         <OutboundCreateModal
           lead={selectedLead}
-          companyId={selectedCompany!}
+          companyId={leadCompanyId(selectedLead)}
           onClose={handleModalClose}
           onSuccess={handleCreateSuccess}
         />
@@ -218,4 +240,3 @@ export default function OutboundB2B() {
     </div>
   )
 }
-
