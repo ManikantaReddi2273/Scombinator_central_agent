@@ -47,8 +47,9 @@ export const authAPI = {
 export const companiesAPI = {
   list: () => api.get('/api/companies/'),
   get: (id: string) => api.get(`/api/companies/${id}`),
-  create: (data: { name: string; email: string }) => 
+  create: (data: { name: string; email: string }) =>
     api.post('/api/companies/', data),
+  delete: (id: string) => api.delete(`/api/companies/${id}`),
   connectOAuth: (companyId: string, data: {
     access_token: string;
     refresh_token: string;

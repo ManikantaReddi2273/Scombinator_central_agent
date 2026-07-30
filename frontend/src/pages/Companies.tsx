@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { companiesAPI } from '../lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { formatDate } from '../lib/utils'
-import { Building2, Mail, Plus, Lock, CheckCircle2 } from 'lucide-react'
+import { Building2, Mail, Plus, Lock, CheckCircle2, Trash2, Loader2 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -11,11 +11,34 @@ import AddCompanyModal from '../components/AddCompanyModal'
 
 export default function Companies() {
   const [isAddCompanyOpen, setIsAddCompanyOpen] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const queryClient = useQueryClient()
 
   const { data: companies, isLoading, refetch } = useQuery({
     queryKey: ['companies'],
     queryFn: () => companiesAPI.list().then((res) => res.data),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (companyId: string) => companiesAPI.delete(companyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
+      queryClient.invalidateQueries({ queryKey: ['emails'] })
+      queryClient.invalidateQueries({ queryKey: ['drafts'] })
+      queryClient.invalidateQueries({ queryKey: ['b2b-leads'] })
+      queryClient.invalidateQueries({ queryKey: ['b2c-leads'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      setDeletingId(null)
+    },
+    onError: (error: any) => {
+      setDeletingId(null)
+      const detail =
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Failed to delete company'
+      alert(`Delete failed: ${detail}`)
+    },
   })
 
   useEffect(() => {
@@ -30,6 +53,7 @@ export default function Companies() {
     }
     setSearchParams({})
   }, [searchParams, setSearchParams, refetch])
+
   const handleConnectOAuth = (companyId: string) => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
     const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
@@ -65,6 +89,18 @@ export default function Companies() {
       `prompt=consent`
 
     window.location.href = googleOAuthUrl
+  }
+
+  const handleDeleteCompany = (company: { company_id: string; name: string }) => {
+    const confirmed = window.confirm(
+      `Delete company "${company.name}"?\n\n` +
+        'This permanently removes the company and all related emails, drafts, ' +
+        'candidates, and audit logs from the database.\n\n' +
+        'This cannot be undone.'
+    )
+    if (!confirmed) return
+    setDeletingId(company.company_id)
+    deleteMutation.mutate(company.company_id)
   }
 
   return (
@@ -142,17 +178,43 @@ export default function Companies() {
                       <span>{formatDate(company.created_at)}</span>
                     </div>
                   </div>
-                  
-                  {!company.has_oauth_connected && (
+
+                  <div className="flex flex-col gap-2">
+                    {!company.has_oauth_connected && (
+                      <Button
+                        onClick={() => handleConnectOAuth(company.company_id)}
+                        className="w-full bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-900 shadow-md"
+                        size="sm"
+                      >
+                        <Lock className="w-4 h-4 mr-2" />
+                        Connect Gmail & Drive
+                      </Button>
+                    )}
                     <Button
-                      onClick={() => handleConnectOAuth(company.company_id)}
-                      className="w-full bg-gradient-to-r from-gray-300 to-gray-400 hover:from-gray-400 hover:to-gray-500 text-gray-900 shadow-md"
+                      variant="outline"
                       size="sm"
+                      className="w-full border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                      disabled={deletingId === company.company_id}
+                      onClick={() =>
+                        handleDeleteCompany({
+                          company_id: company.company_id,
+                          name: company.name,
+                        })
+                      }
                     >
-                      <Lock className="w-4 h-4 mr-2" />
-                      Connect Gmail & Drive
+                      {deletingId === company.company_id ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete Company
+                        </>
+                      )}
                     </Button>
-                  )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -177,16 +239,13 @@ export default function Companies() {
         </Card>
       )}
 
-      {/* Add Company Modal */}
       <AddCompanyModal
         isOpen={isAddCompanyOpen}
         onClose={() => setIsAddCompanyOpen(false)}
-        onConnect={(companyName) => {
+        onConnect={() => {
           setIsAddCompanyOpen(false)
-          // OAuth redirect will happen in the modal
         }}
       />
     </div>
   )
 }
-

@@ -532,6 +532,95 @@ async def check_oauth_scopes(
         )
 
 
+@router.delete("/{company_id}")
+async def delete_company(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(get_current_admin),
+):
+    """
+    Permanently delete a company and all related rows:
+    drafts, emails, candidates, and audit logs for that company.
+    """
+    from sqlalchemy import delete as sa_delete
+    from models.draft import Draft
+    from models.email import Email
+    from models.candidate import Candidate
+    from models.log import AuditLog
+    import uuid as uuid_mod
+
+    try:
+        company_uuid = uuid_mod.UUID(company_id.strip().strip("{}"))
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid company_id format",
+        )
+
+    result = await db.execute(
+        select(Company).where(Company.company_id == company_uuid)
+    )
+    company = result.scalar_one_or_none()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    company_name = company.name
+    company_email = company.email
+
+    try:
+        # Order matters: drafts reference emails, both reference company
+        drafts_result = await db.execute(
+            sa_delete(Draft).where(Draft.company_id == company_uuid)
+        )
+        emails_result = await db.execute(
+            sa_delete(Email).where(Email.company_id == company_uuid)
+        )
+        candidates_result = await db.execute(
+            sa_delete(Candidate).where(Candidate.company_id == company_uuid)
+        )
+        logs_result = await db.execute(
+            sa_delete(AuditLog).where(AuditLog.company_id == company_uuid)
+        )
+        await db.execute(
+            sa_delete(Company).where(Company.company_id == company_uuid)
+        )
+        await db.commit()
+
+        deleted = {
+            "drafts": drafts_result.rowcount or 0,
+            "emails": emails_result.rowcount or 0,
+            "candidates": candidates_result.rowcount or 0,
+            "audit_logs": logs_result.rowcount or 0,
+        }
+        logger.info(
+            "Admin %s deleted company %s (%s): %s",
+            admin.email,
+            company_name,
+            company_id,
+            deleted,
+        )
+        return {
+            "status": "deleted",
+            "company_id": company_id,
+            "name": company_name,
+            "email": company_email,
+            "deleted_counts": deleted,
+            "message": f"Company '{company_name}' and all related data were deleted.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error("Error deleting company %s: %s", company_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete company: {str(e)}",
+        )
+
+
 @router.get("/{company_id}", response_model=CompanyResponse)
 async def get_company(
     company_id: str,
