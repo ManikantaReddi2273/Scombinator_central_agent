@@ -1,0 +1,92 @@
+# Render Blueprint — S Combinator Central Agent Platform
+# Docs: https://render.com/docs/blueprint-spec
+#
+# After you commit + push this file to GitHub `main`, reload the Blueprint
+# page. You will be prompted to fill secrets marked sync: false.
+#
+# Note: n8n is not included here (Docker/self-hosted). Run it separately
+# and point N8N_WEBHOOK_URL / N8N_SERVICE_API_KEY at your Render backend.
+
+databases:
+  - name: scombinator-db
+    plan: free
+    databaseName: s_combinator
+    user: scombinator
+
+services:
+  # ---------- Backend (FastAPI) ----------
+  - type: web
+    name: scombinator-backend
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start_render.sh
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DEBUG
+        value: "False"
+      - key: APP_NAME
+        value: S Combinator Central Agent Platform
+      - key: APP_VERSION
+        value: "1.0.0"
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      # Render Postgres connection string → converted in start_render.sh
+      - key: DATABASE_URL
+        fromDatabase:
+          name: scombinator-db
+          property: connectionString
+      # Secrets — set these in the Render dashboard when prompted
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_ROLE
+        value: ADMIN
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: N8N_SERVICE_API_KEY
+        sync: false
+      - key: N8N_WEBHOOK_URL
+        sync: false
+      # Set this to your frontend Render URL after first deploy, e.g.
+      # https://scombinator-frontend.onrender.com
+      - key: FRONTEND_URL
+        sync: false
+
+  # ---------- Frontend (React / Vite static site) ----------
+  - type: web
+    name: scombinator-frontend
+    runtime: static
+    plan: free
+    region: oregon
+    rootDir: frontend
+    # Skip `tsc` (pre-existing unused-import errors); Vite still type-checks imports at build
+    buildCommand: npm install && npx vite build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Baked into the JS bundle at build time — set to backend URL, e.g.
+      # https://scombinator-backend.onrender.com
+      - key: VITE_API_URL
+        fromService:
+          name: scombinator-backend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

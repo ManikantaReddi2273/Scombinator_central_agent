@@ -174,7 +174,22 @@ docker logs -f s-combinator-n8n   # view logs
 
 ---
 
-## Quick Start (after first-time setup)
+## Deploying to Render (Blueprint)
+
+Render’s **New Blueprint** flow looks for a root file named `render.yaml` on your selected branch (usually `main`). This repo includes that file.
+
+1. Commit and push `render.yaml` (and related deploy files) to GitHub `main`.
+2. In Render → **New → Blueprint** → select `ManikantaReddi2273/Scombinator_central_agent` → branch `main`.
+3. Fill secrets when prompted: `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ENCRYPTION_KEY`, `OPENAI_API_KEY`, `N8N_SERVICE_API_KEY`, `N8N_WEBHOOK_URL`, `FRONTEND_URL`.
+4. After the frontend URL exists, set backend `FRONTEND_URL` to that URL (e.g. `https://scombinator-frontend.onrender.com`) and redeploy the backend so CORS works.
+5. SSH/shell into the backend once and run `python init_db.py` (or use Render Shell) to create tables + admin user.
+
+**Alternative (no Blueprint):** create a **Web Service** for `backend/` and a **Static Site** for `frontend/` manually in the Render dashboard — then `render.yaml` is not required.
+
+**Not on Render by default:** n8n stays on Docker (local or another host). Point it at your Render backend URL.
+
+---
+
 
 Three terminals:
 

@@ -18,15 +18,20 @@ app = FastAPI(
 
 # CORS middleware - MUST be added before routers
 # Note: allow_credentials=True cannot be used with allow_origins=["*"]
-# For development, we allow specific origins
+# Localhost for development; FRONTEND_URL for production (Render static site)
+_cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+]
+_frontend_url = (getattr(settings, "FRONTEND_URL", None) or "").strip().rstrip("/")
+if _frontend_url and _frontend_url not in _cors_origins:
+    _cors_origins.append(_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
@@ -35,20 +40,19 @@ app.add_middleware(
 )
 
 # Exception handlers to ensure CORS headers are always sent
+def _cors_origin_header(request: Request) -> str:
+    origin = request.headers.get("origin", "http://localhost:3000")
+    return origin if origin in _cors_origins else _cors_origins[0]
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions with CORS headers"""
-    origin = request.headers.get("origin", "http://localhost:3000")
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail},
         headers={
-            "Access-Control-Allow-Origin": origin if origin in [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "http://localhost:3001",
-                "http://127.0.0.1:3001",
-            ] else "http://localhost:3000",
+            "Access-Control-Allow-Origin": _cors_origin_header(request),
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Credentials": "true",
@@ -63,17 +67,11 @@ async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {str(exc)}")
     logger.error(traceback.format_exc())
     
-    origin = request.headers.get("origin", "http://localhost:3000")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": f"Internal server error: {str(exc)}"},
         headers={
-            "Access-Control-Allow-Origin": origin if origin in [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "http://localhost:3001",
-                "http://127.0.0.1:3001",
-            ] else "http://localhost:3000",
+            "Access-Control-Allow-Origin": _cors_origin_header(request),
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Credentials": "true",
@@ -84,16 +82,10 @@ async def general_exception_handler(request: Request, exc: Exception):
 @app.options("/{full_path:path}")
 async def options_handler(request: Request, full_path: str):
     """Handle CORS preflight OPTIONS requests"""
-    origin = request.headers.get("origin", "http://localhost:3000")
     return JSONResponse(
         content={"message": "OK"},
         headers={
-            "Access-Control-Allow-Origin": origin if origin in [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "http://localhost:3001",
-                "http://127.0.0.1:3001",
-            ] else "http://localhost:3000",
+            "Access-Control-Allow-Origin": _cors_origin_header(request),
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Credentials": "true",

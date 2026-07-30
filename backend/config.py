@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     N8N_WEBHOOK_URL: str = "http://localhost:5678/webhook"
     # Optional: API key for n8n / service calls (e.g. Update CRM). If set, requests with X-API-Key: <value> are accepted.
     N8N_SERVICE_API_KEY: Optional[str] = None
+
+    # Production frontend origin (e.g. https://scombinator-frontend.onrender.com)
+    FRONTEND_URL: Optional[str] = None
     
     # Redis
     REDIS_HOST: str = "localhost"
