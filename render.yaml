@@ -69,11 +69,10 @@ services:
         sync: false
 
   # ---------- Frontend (React / Vite static site) ----------
-  # Note: static sites cannot set `region` (CDN-backed globally)
+  # Note: static sites cannot set `region` or `plan: free`
   - type: web
     name: scombinator-frontend
     runtime: static
-    plan: free
     rootDir: frontend
     # Skip `tsc` (pre-existing unused-import errors); Vite still type-checks imports at build
     buildCommand: npm install && npx vite build
