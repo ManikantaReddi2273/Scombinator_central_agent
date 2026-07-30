@@ -5,45 +5,57 @@ import { Badge } from '../components/ui/badge'
 import { formatDate } from '../lib/utils'
 import { Building2, Mail, Plus, Lock, CheckCircle2 } from 'lucide-react'
 import { Button } from '../components/ui/button'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AddCompanyModal from '../components/AddCompanyModal'
 
 export default function Companies() {
   const [isAddCompanyOpen, setIsAddCompanyOpen] = useState(false)
-  
-  const { data: companies, isLoading } = useQuery({
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const { data: companies, isLoading, refetch } = useQuery({
     queryKey: ['companies'],
     queryFn: () => companiesAPI.list().then((res) => res.data),
   })
 
+  useEffect(() => {
+    const oauth = searchParams.get('oauth')
+    if (!oauth) return
+    if (oauth === 'success') {
+      alert('Gmail & Drive connected successfully.')
+      refetch()
+    } else {
+      const message = searchParams.get('message') || 'unknown'
+      alert(`OAuth failed: ${message}`)
+    }
+    setSearchParams({})
+  }, [searchParams, setSearchParams, refetch])
   const handleConnectOAuth = (companyId: string) => {
-    // Get Google OAuth credentials from environment variables
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
-    const redirectUri = import.meta.env.VITE_N8N_CALLBACK_URL || 'http://localhost:5678/webhook/oauth-connect'
-    
-    // DEBUG: Log the redirect URI to help diagnose redirect_uri_mismatch
-    console.log('🔍 OAuth Debug Info:')
-    console.log('  - Client ID:', clientId ? '✅ Set' : '❌ Missing')
-    console.log('  - Redirect URI:', redirectUri)
-    console.log('  - Env var VITE_N8N_CALLBACK_URL:', import.meta.env.VITE_N8N_CALLBACK_URL || 'Not set (using default)')
-    console.log('  - Company ID:', companyId)
-    
+    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+    // Prefer explicit n8n callback (local Docker). On Render, use backend callback.
+    const redirectUri =
+      import.meta.env.VITE_N8N_CALLBACK_URL ||
+      `${apiBase}/api/companies/oauth/callback`
+
     if (!clientId) {
-      alert('OAuth configuration missing. Please contact administrator.')
+      alert(
+        'OAuth configuration missing.\n\n' +
+          'Set VITE_GOOGLE_CLIENT_ID on the frontend (Render Environment), ' +
+          'then clear build cache and redeploy the frontend.'
+      )
       return
     }
-    
-    // Build Google OAuth URL with company_id in state
-    // gmail.modify includes read, send, and modify (mark as read) permissions
-    // sheets includes read/write access to Google Sheets
+
     const scopes = [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/drive.readonly',
       'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/spreadsheets'  // Google Sheets API access
+      'https://www.googleapis.com/auth/spreadsheets',
     ].join(' ')
-    
-    const googleOAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+
+    const googleOAuthUrl =
+      `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${encodeURIComponent(clientId)}&` +
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `response_type=code&` +
@@ -51,15 +63,7 @@ export default function Companies() {
       `state=${encodeURIComponent(companyId)}&` +
       `access_type=offline&` +
       `prompt=consent`
-    
-    // Debug: Log full OAuth URL and scopes
-    console.log('🔍 OAuth Scopes Debug:')
-    console.log('  - Scopes array:', scopes.split(' '))
-    console.log('  - Has spreadsheets scope:', scopes.includes('spreadsheets'))
-    console.log('  - Full OAuth URL:', googleOAuthUrl)
-    console.log('  - Decoded scope param:', decodeURIComponent(googleOAuthUrl.split('scope=')[1]?.split('&')[0] || ''))
-    
-    // Redirect to Google OAuth
+
     window.location.href = googleOAuthUrl
   }
 

@@ -1,9 +1,11 @@
 """
 Company management routes
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from typing import Optional
 from database import get_db
 from models.admin import Admin
 from models.company import Company
@@ -11,12 +13,33 @@ from schemas.company import CompanyRegisterRequest, CompanyResponse, CompanyCrea
 from services.tenant import tenant_service
 from services.audit_logger import audit_logger_service
 from auth.jwt import get_current_admin
+from config import settings
+import httpx
 import traceback
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
+
+
+def _frontend_redirect(path: str = "/companies", query: str = "") -> RedirectResponse:
+    """Redirect browser back to the React dashboard after OAuth."""
+    base = (settings.FRONTEND_URL or "http://localhost:3000").rstrip("/")
+    url = f"{base}{path}"
+    if query:
+        url = f"{url}?{query}"
+    return RedirectResponse(url=url, status_code=302)
+
+
+def _oauth_callback_redirect_uri(request: Request) -> str:
+    """Public callback URL Google redirects to (must match Google Cloud Console)."""
+    # Prefer configured backend public URL if set via Render
+    configured = (getattr(settings, "BACKEND_PUBLIC_URL", None) or "").strip().rstrip("/")
+    if configured:
+        return f"{configured}/api/companies/oauth/callback"
+    # Fallback: derive from the incoming request (works on Render)
+    return str(request.url_for("google_oauth_callback"))
 
 
 @router.post("/", response_model=CompanyResponse)
@@ -121,6 +144,85 @@ async def connect_oauth(
         created_at=company.created_at,
         has_oauth_connected=True
     )
+
+
+@router.get("/oauth/callback", name="google_oauth_callback")
+async def google_oauth_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    error_description: Optional[str] = Query(None),
+):
+    """
+    Google OAuth redirect target for production (Render).
+    Exchanges the authorization code for tokens and stores them on the company.
+    Does not require n8n — works when n8n stays on local Docker.
+    """
+    if error:
+        logger.error("Google OAuth error: %s — %s", error, error_description)
+        return _frontend_redirect("/companies", f"oauth=error&message={error}")
+
+    if not code or not state:
+        return _frontend_redirect("/companies", "oauth=error&message=missing_code_or_state")
+
+    client_id = (settings.GOOGLE_CLIENT_ID or "").strip()
+    client_secret = (settings.GOOGLE_CLIENT_SECRET or "").strip()
+    if not client_id or not client_secret:
+        logger.error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not configured on backend")
+        return _frontend_redirect("/companies", "oauth=error&message=server_oauth_not_configured")
+
+    redirect_uri = _oauth_callback_redirect_uri(request)
+    company_id = state.strip()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            token_resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        if token_resp.status_code != 200:
+            logger.error("Google token exchange failed: %s %s", token_resp.status_code, token_resp.text)
+            return _frontend_redirect("/companies", "oauth=error&message=token_exchange_failed")
+
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = int(token_data.get("expires_in") or 3600)
+
+        if not access_token:
+            return _frontend_redirect("/companies", "oauth=error&message=no_access_token")
+
+        # Google may omit refresh_token on re-consent; keep existing if missing
+        if not refresh_token:
+            company = await tenant_service.get_company_by_id(db, company_id)
+            if company and company.encrypted_refresh_token:
+                from services.encryption import encryption_service
+                refresh_token = encryption_service.decrypt(company.encrypted_refresh_token)
+            else:
+                return _frontend_redirect("/companies", "oauth=error&message=no_refresh_token")
+
+        await tenant_service.connect_oauth_to_company(
+            db=db,
+            company_id=company_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            n8n_credential_id=None,
+            expires_in=expires_in,
+        )
+        logger.info("OAuth connected for company %s via backend callback", company_id)
+        return _frontend_redirect("/companies", "oauth=success")
+    except Exception as e:
+        logger.error("OAuth callback failed: %s", str(e), exc_info=True)
+        return _frontend_redirect("/companies", "oauth=error&message=callback_failed")
 
 
 @router.post("/{company_id}/refresh-brand-context")

@@ -36,9 +36,11 @@ class Settings(BaseSettings):
     # Encryption
     ENCRYPTION_KEY: str  # 32 bytes for AES-256
     
-    # Google OAuth (reference only, actual OAuth via n8n)
+    # Google OAuth (backend callback on Render; n8n still optional locally)
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
+    # Optional explicit public backend URL, e.g. https://scombinator-backend.onrender.com
+    BACKEND_PUBLIC_URL: Optional[str] = None
     
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
