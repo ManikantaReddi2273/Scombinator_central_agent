@@ -9,7 +9,10 @@ from datetime import datetime
 
 class EmailProcessRequest(BaseModel):
     """Email processing request from n8n"""
-    credential_id: str
+    # Legacy n8n credential mapping (optional when company_id is provided)
+    credential_id: Optional[str] = None
+    # Preferred when OAuth was connected via backend callback (no n8n credential)
+    company_id: Optional[str] = None
     email_data: Dict[str, Any]
     # email_data contains: subject, body, from, to, thread_id, gmail_message_id, etc.
 

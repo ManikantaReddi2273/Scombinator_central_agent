@@ -48,11 +48,27 @@ async def process_email(
             detail="Email must have at least subject or body"
         )
     
-    # Map credential_id to company_id
-    company_id = await tenant_service.map_credential_to_company(
-        db, email_request.credential_id
-    )
-    
+    # Map company: prefer company_id (Render OAuth), then n8n credential_id, then to-email
+    company_id = None
+    if email_request.company_id:
+        company = await tenant_service.get_company_by_id(db, email_request.company_id)
+        if company:
+            company_id = str(company.company_id)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Company not found for company_id: {email_request.company_id}"
+            )
+    elif email_request.credential_id:
+        company_id = await tenant_service.map_credential_to_company(
+            db, email_request.credential_id
+        )
+        # credential_id might actually be a company UUID (Render OAuth path)
+        if not company_id:
+            company = await tenant_service.get_company_by_id(db, email_request.credential_id)
+            if company:
+                company_id = str(company.company_id)
+
     if not company_id:
         # Try mapping by email
         to_email = email_data.get("to", "")
@@ -60,7 +76,10 @@ async def process_email(
         if not company:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Company not found for credential_id: {email_request.credential_id}"
+                detail=(
+                    f"Company not found for credential_id={email_request.credential_id!r}, "
+                    f"company_id={email_request.company_id!r}, to={to_email!r}"
+                )
             )
         company_id = str(company.company_id)
     

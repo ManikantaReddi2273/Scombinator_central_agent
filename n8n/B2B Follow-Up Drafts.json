@@ -21,7 +21,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=http://host.docker.internal:8000/api/companies/with-oauth",
+        "url": "=https://scombinator-backend.onrender.com/api/companies/with-oauth",
         "authentication": "none",
         "options": {
           "response": {
@@ -52,7 +52,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=http://host.docker.internal:8000/api/outbound/b2b/leads-due-for-follow-up?company_id={{ $json.company_id }}&api_key={{ $env.N8N_SERVICE_API_KEY }}",
+        "url": "=https://scombinator-backend.onrender.com/api/outbound/b2b/leads-due-for-follow-up?company_id={{ $json.company_id }}&api_key={{ $env.N8N_SERVICE_API_KEY }}",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
@@ -121,7 +121,7 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "=http://host.docker.internal:8000/api/outbound/b2b/leads/{{ $json.lead_id }}/mark-outreach-stopped?company_id={{ $json.company_id }}&api_key={{ $env.N8N_SERVICE_API_KEY }}",
+        "url": "=https://scombinator-backend.onrender.com/api/outbound/b2b/leads/{{ $json.lead_id }}/mark-outreach-stopped?company_id={{ $json.company_id }}&api_key={{ $env.N8N_SERVICE_API_KEY }}",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
@@ -152,7 +152,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://host.docker.internal:8000/api/outbound/create?api_key={{ $env.N8N_SERVICE_API_KEY }}",
+        "url": "=https://scombinator-backend.onrender.com/api/outbound/create?api_key={{ $env.N8N_SERVICE_API_KEY }}",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {

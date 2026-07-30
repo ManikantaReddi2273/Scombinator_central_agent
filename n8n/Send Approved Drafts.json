@@ -24,7 +24,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=http://host.docker.internal:8000/api/drafts/approved?limit=10",
+        "url": "=https://scombinator-backend.onrender.com/api/drafts/approved?limit=10",
         "authentication": "none",
         "options": {
           "response": {
@@ -61,7 +61,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=http://host.docker.internal:8000/api/companies/{{ $json.company_id }}/gmail-token",
+        "url": "=https://scombinator-backend.onrender.com/api/companies/{{ $json.company_id }}/gmail-token",
         "authentication": "none",
         "options": {
           "response": {
@@ -99,7 +99,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=http://host.docker.internal:8000/api/emails/{{ $json.draft_email_id }}",
+        "url": "=https://scombinator-backend.onrender.com/api/emails/{{ $json.draft_email_id }}",
         "authentication": "none",
         "options": {
           "response": {
@@ -307,7 +307,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://host.docker.internal:8000/api/drafts/{{ $json.draft_id }}/sent",
+        "url": "=https://scombinator-backend.onrender.com/api/drafts/{{ $json.draft_id }}/sent",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
@@ -384,7 +384,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://host.docker.internal:8000/api/outbound/sent/{{ $json.draft_id }}/update-crm",
+        "url": "=https://scombinator-backend.onrender.com/api/outbound/sent/{{ $json.draft_id }}/update-crm",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {

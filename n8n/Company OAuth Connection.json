@@ -108,7 +108,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://host.docker.internal:8000/api/companies/{{ $json.company_id }}/connect-oauth",
+        "url": "=https://scombinator-backend.onrender.com/api/companies/{{ $json.company_id }}/connect-oauth",
         "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
@@ -144,7 +144,7 @@
     {
       "parameters": {
         "respondWith": "redirect",
-        "redirectURL": "={{ 'http://localhost:3000/companies?success=true&oauth_connected=true' }}",
+        "redirectURL": "={{ 'https://scombinator-frontend.onrender.com/companies?oauth=success' }}",
         "options": {}
       },
       "type": "n8n-nodes-base.respondToWebhook",
