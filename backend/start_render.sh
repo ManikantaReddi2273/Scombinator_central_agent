@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Convert Render's Postgres URL into the formats this FastAPI app expects,
+# Normalize DATABASE_URL for this FastAPI app (Render Postgres OR Neon),
 # create tables + admin if needed, then start uvicorn on Render's $PORT.
 set -euo pipefail
 
@@ -9,22 +9,42 @@ if [ -z "$RAW" ]; then
   exit 1
 fi
 
-# Render often provides postgres://… — normalize to postgresql://…
+# Render / some hosts provide postgres://… — normalize to postgresql://…
 case "$RAW" in
   postgres://*)
     RAW="postgresql://${RAW#postgres://}"
     ;;
 esac
 
-# Sync driver URL for SQLAlchemy sync / Alembic-style use
-export DATABASE_URL_SYNC="$RAW"
+# Strip query string for rebuilding driver-specific URLs
+BASE="${RAW%%\?*}"
+QUERY=""
+case "$RAW" in
+  *\?*) QUERY="${RAW#*\?}" ;;
+esac
 
-# Async driver URL for asyncpg
-export DATABASE_URL="postgresql+asyncpg://${RAW#postgresql://}"
+# Sync URL: keep sslmode=require for Neon/psycopg2
+SYNC_URL="$BASE"
+if echo "$BASE" | grep -qi "neon.tech\|pooler"; then
+  SYNC_URL="${BASE}?sslmode=require"
+elif [ -n "$QUERY" ]; then
+  # Keep original query if present (non-Neon)
+  SYNC_URL="${BASE}?${QUERY}"
+fi
+export DATABASE_URL_SYNC="$SYNC_URL"
+
+# Async URL for asyncpg: use ssl=require (NOT sslmode / channel_binding)
+ASYNC_BASE="postgresql+asyncpg://${BASE#postgresql://}"
+if echo "$BASE" | grep -qi "neon.tech\|pooler"; then
+  export DATABASE_URL="${ASYNC_BASE}?ssl=require"
+else
+  export DATABASE_URL="$ASYNC_BASE"
+fi
 export LANGRAPH_CHECKPOINT_DB_URL="$DATABASE_URL"
 
-# Free-tier friendly: no Shell required — create tables + admin on boot
-# (safe to re-run; skips creating admin if email already exists)
+echo "DB target: $(echo "$BASE" | sed -E 's#://[^:]+:[^@]+@#://***:***@#')"
+
+# Free-tier friendly: create tables + admin on boot
 echo "Initializing database tables and admin user…"
 python init_db.py
 

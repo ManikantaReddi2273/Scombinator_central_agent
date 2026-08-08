@@ -7,13 +7,9 @@
 # Google Cloud Console → OAuth client → Authorized redirect URIs must include:
 #   https://scombinator-backend.onrender.com/api/companies/oauth/callback
 #
+# Database: prefer Neon (set DATABASE_URL manually in Render).
+# The old Render Postgres `scombinator-db` can be deleted after you switch.
 # n8n is optional on Render. Local Docker n8n can still call the Render backend later.
-
-databases:
-  - name: scombinator-db
-    plan: free
-    databaseName: s_combinator
-    user: scombinator
 
 services:
   # ---------- Backend (FastAPI) ----------
@@ -43,10 +39,11 @@ services:
         value: gpt-4o
       - key: APP_TIMEZONE
         value: Asia/Kolkata
+      # Paste your Neon connection string here in the Render dashboard
+      # (postgresql://...neon.tech/neondb?sslmode=require). start_render.sh
+      # converts it to asyncpg automatically.
       - key: DATABASE_URL
-        fromDatabase:
-          name: scombinator-db
-          property: connectionString
+        sync: false
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD

@@ -6,31 +6,50 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import create_engine
 from config import settings
 
+
+def _is_neon_or_pooler(url: str) -> bool:
+    u = (url or "").lower()
+    return "neon.tech" in u or "pooler" in u
+
+
+def _async_connect_args() -> dict:
+    """
+    Neon (and other PgBouncer poolers) need SSL + disabled statement cache.
+    Local Postgres does not need those extras.
+    """
+    args: dict = {
+        "timeout": 30,
+        "server_settings": {
+            "application_name": "s_combinator_backend",
+        },
+    }
+    if _is_neon_or_pooler(settings.DATABASE_URL):
+        # Required for Neon pooler / transaction-mode PgBouncer
+        args["statement_cache_size"] = 0
+        args["ssl"] = True
+    return args
+
+
 # Async engine for FastAPI
-# Small pool by default — Render free Postgres rejects large connection pools and
-# OOMs when many Flow 1 jobs open sessions in parallel.
+# Small pool by default — free Postgres / Neon free reject large connection pools.
 async_engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True,
-    pool_pre_ping=True,  # Verify connections before using
-    pool_recycle=3600,   # Recycle connections after 1 hour
-    pool_timeout=30,     # Timeout when getting connection from pool
+    pool_pre_ping=True,
+    pool_recycle=300 if _is_neon_or_pooler(settings.DATABASE_URL) else 3600,
+    pool_timeout=30,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
-    connect_args={
-        "server_settings": {
-            "application_name": "s_combinator_backend"
-        },
-        "timeout": 30,  # Connection timeout in seconds (increased)
-    }
+    connect_args=_async_connect_args(),
 )
 
-# Sync engine for Alembic migrations
-sync_engine = create_engine(
-    settings.DATABASE_URL_SYNC,
-    echo=settings.DEBUG
-)
+# Sync engine for Alembic / sync helpers
+_sync_kwargs = {"echo": settings.DEBUG}
+if _is_neon_or_pooler(settings.DATABASE_URL_SYNC):
+    _sync_kwargs["connect_args"] = {"sslmode": "require"}
+
+sync_engine = create_engine(settings.DATABASE_URL_SYNC, **_sync_kwargs)
 
 # Session factories
 AsyncSessionLocal = async_sessionmaker(
@@ -38,7 +57,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
-    autoflush=False
+    autoflush=False,
 )
 
 # Base class for models
@@ -55,7 +74,6 @@ async def get_db():
                 await session.commit()
             except Exception as e:
                 await session.rollback()
-                # Check if it's a connection error
                 error_msg = str(e).lower()
                 if "connection" in error_msg or "timeout" in error_msg or "refused" in error_msg or "could not connect" in error_msg:
                     from fastapi import HTTPException, status
@@ -70,7 +88,6 @@ async def get_db():
             finally:
                 await session.close()
     except Exception as e:
-        # This catches errors when creating the session itself
         from fastapi import HTTPException, status
         import logging
         logger = logging.getLogger(__name__)
@@ -82,4 +99,3 @@ async def get_db():
                 detail=f"Database connection error: {str(e)}. Please check if PostgreSQL is running and DATABASE_URL is correct in .env file."
             )
         raise
-
